@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Warframe Mod Flip Tracker</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0a14;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', 'Inter', Arial, sans-serif;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: linear-gradient(135deg, #0d1117 0%, #161b26 100%);
+    border-bottom: 1px solid #1e2a3a;
+    padding: 18px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .header-left { display: flex; flex-direction: column; gap: 4px; }
+  .header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #00e5ff;
+    letter-spacing: 0.5px;
+  }
+  .formula-text {
+    font-size: 11px;
+    color: #667788;
+    font-family: 'Consolas', 'Courier New', monospace;
+  }
+  .formula-text span { color: #8899aa; }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .status-text {
+    font-size: 13px;
+    color: #8899aa;
+  }
+  .status-text span { color: #00e5ff; }
+  .fetch-btn {
+    background: linear-gradient(135deg, #00b4d8, #0077b6);
+    color: #fff;
+    border: none;
+    padding: 8px 20px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .fetch-btn:hover { background: linear-gradient(135deg, #00e5ff, #0096c7); transform: translateY(-1px); }
+  .fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  /* ── Progress Bar ── */
+  .progress-container {
+    background: #0d1117;
+    padding: 0;
+    height: 0;
+    overflow: hidden;
+    transition: height 0.3s, padding 0.3s;
+  }
+  .progress-container.active {
+    height: auto;
+    padding: 12px 28px;
+  }
+  .progress-bar-bg {
+    background: #1a2332;
+    border-radius: 4px;
+    height: 8px;
+    overflow: hidden;
+  }
+  .progress-bar-fill {
+    background: linear-gradient(90deg, #00b4d8, #00e5ff);
+    height: 100%;
+    width: 0%;
+    transition: width 0.3s;
+    border-radius: 4px;
+  }
+  .progress-text {
+    font-size: 12px;
+    color: #8899aa;
+    margin-top: 6px;
+  }
+
+  /* ── Filters ── */
+  .filters {
+    background: #0d1117;
+    border-bottom: 1px solid #1e2a3a;
+    padding: 14px 28px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .filter-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .filter-group label {
+    font-size: 12px;
+    color: #8899aa;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+  .filter-group input[type="text"],
+  .filter-group input[type="number"] {
+    background: #1a2332;
+    border: 1px solid #2a3a4a;
+    color: #e0e0e0;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    width: 90px;
+  }
+  .filter-group input[type="text"] { width: 180px; }
+  .filter-group input:focus { outline: none; border-color: #00b4d8; }
+
+  .type-filters {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .type-chip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .type-chip input[type="checkbox"] { display: none; }
+  .type-chip .chip {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid #2a3a4a;
+    transition: all 0.2s;
+  }
+  .type-chip input:checked + .chip { border-color: transparent; }
+  .type-chip.archon input:checked + .chip { background: #7c3aed; color: #fff; }
+  .type-chip.galvanized input:checked + .chip { background: #d97706; color: #fff; }
+  .type-chip.primed input:checked + .chip { background: #0ea5e9; color: #fff; }
+  .type-chip.regular input:checked + .chip { background: #4b5563; color: #fff; }
+  .type-chip input:not(:checked) + .chip { color: #667; }
+
+  .filter-sep {
+    width: 1px;
+    height: 24px;
+    background: #2a3a4a;
+  }
+
+  .result-count {
+    font-size: 12px;
+    color: #8899aa;
+    margin-left: auto;
+  }
+  .result-count span { color: #00e5ff; font-weight: 700; }
+
+  /* ── Table ── */
+  .table-wrapper {
+    overflow-x: auto;
+    padding: 0 16px 20px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+    font-size: 13px;
+  }
+  thead th {
+    background: #131a27;
+    color: #8899aa;
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 12px;
+    text-align: left;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    border-bottom: 2px solid #1e2a3a;
+    transition: color 0.2s;
+  }
+  thead th:hover { color: #00e5ff; }
+  thead th.sorted-asc::after { content: ' \25B2'; color: #00e5ff; }
+  thead th.sorted-desc::after { content: ' \25BC'; color: #00e5ff; }
+  thead th.no-sort { cursor: default; }
+  thead th.no-sort:hover { color: #8899aa; }
+
+  tbody tr {
+    border-bottom: 1px solid #141c28;
+    transition: background 0.15s;
+  }
+  tbody tr:hover { background: #131a27; }
+  tbody td {
+    padding: 8px 12px;
+    vertical-align: middle;
+  }
+
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .rank-col { color: #556; width: 50px; }
+
+  /* Type badges */
+  .type-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .type-archon { background: #7c3aed22; color: #a78bfa; border: 1px solid #7c3aed44; }
+  .type-galvanized { background: #d9770622; color: #fbbf24; border: 1px solid #d9770644; }
+  .type-primed { background: #0ea5e922; color: #38bdf8; border: 1px solid #0ea5e944; }
+  .type-regular { background: #4b556322; color: #9ca3af; border: 1px solid #4b556344; }
+
+  /* Profit coloring */
+  .profit-high { color: #4ade80; font-weight: 600; }
+  .profit-mid { color: #fbbf24; }
+  .profit-low { color: #f87171; }
+
+  .opp-high { color: #4ade80; font-weight: 600; }
+  .opp-mid { color: #fbbf24; }
+  .opp-low { color: #f87171; }
+
+  .mod-link {
+    color: #0ea5e9;
+    text-decoration: none;
+    font-size: 12px;
+  }
+  .mod-link:hover { text-decoration: underline; color: #38bdf8; }
+
+  /* ── Empty State ── */
+  .empty-state {
+    text-align: center;
+    padding: 80px 20px;
+    color: #556;
+  }
+  .empty-state h2 { color: #667; font-size: 18px; margin-bottom: 8px; }
+  .empty-state p { font-size: 14px; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: #0a0a14; }
+  ::-webkit-scrollbar-thumb { background: #2a3a4a; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a4a5a; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>Warframe Mod Flip Tracker</h1>
+    <div class="formula-text">
+      <span>Flip Profit</span> = Sell SMA - Buy SMA &nbsp;&nbsp;|&nbsp;&nbsp;
+      <span>Opp Score</span> = Flip Profit &times; ln(R10 Volume + 1)
+      <br>
+      <span>Profit Color:</span> &ge;80 green, &ge;60 yellow, &lt;60 red &nbsp;&nbsp;|&nbsp;&nbsp;
+      <span>Opp Color:</span> &ge;300 green, &ge;250 yellow, &lt;250 red
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-text" id="statusText">No data loaded</div>
+    <button class="fetch-btn" id="fetchBtn" onclick="startFetch()">Fetch Data</button>
+  </div>
+</div>
+
+<div class="progress-container" id="progressContainer">
+  <div class="progress-bar-bg">
+    <div class="progress-bar-fill" id="progressFill"></div>
+  </div>
+  <div class="progress-text" id="progressText"></div>
+</div>
+
+<div class="filters" id="filtersBar">
+  <div class="filter-group">
+    <label>Search</label>
+    <input type="text" id="filterName" placeholder="Mod name..." oninput="applyFilters()">
+  </div>
+
+  <div class="filter-sep"></div>
+
+  <div class="filter-group type-filters">
+    <label>Type</label>
+    <label class="type-chip archon">
+      <input type="checkbox" checked onchange="applyFilters()"><span class="chip">Archon</span>
+    </label>
+    <label class="type-chip galvanized">
+      <input type="checkbox" checked onchange="applyFilters()"><span class="chip">Galvanized</span>
+    </label>
+    <label class="type-chip primed">
+      <input type="checkbox" checked onchange="applyFilters()"><span class="chip">Primed</span>
+    </label>
+    <label class="type-chip regular">
+      <input type="checkbox" checked onchange="applyFilters()"><span class="chip">Regular</span>
+    </label>
+  </div>
+
+  <div class="filter-sep"></div>
+
+  <div class="filter-group">
+    <label>Min Profit</label>
+    <input type="number" id="filterMinProfit" placeholder="0" oninput="applyFilters()">
+  </div>
+  <div class="filter-group">
+    <label>Min Opp Score</label>
+    <input type="number" id="filterMinOpp" placeholder="0" oninput="applyFilters()">
+  </div>
+  <div class="filter-group">
+    <label>Min Sell Price</label>
+    <input type="number" id="filterMinSell" placeholder="0" oninput="applyFilters()">
+  </div>
+  <div class="filter-group">
+    <label>Min Volume</label>
+    <input type="number" id="filterMinVol" placeholder="0" oninput="applyFilters()">
+  </div>
+
+  <div class="result-count" id="resultCount"></div>
+</div>
+
+<div class="table-wrapper">
+  <table id="modTable">
+    <thead>
+      <tr>
+        <th data-col="rank" class="sorted-asc">#</th>
+        <th data-col="name">Mod Name</th>
+        <th data-col="type">Type</th>
+        <th data-col="buyPrice" class="num">Buy (R0)</th>
+        <th data-col="sellPrice" class="num">Sell (R10)</th>
+        <th data-col="flipProfit" class="num">Flip Profit</th>
+        <th data-col="oppScore" class="num">Opp Score</th>
+        <th data-col="maxVol" class="num">R10 Volume</th>
+        <th data-col="link" class="no-sort">Link</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+  <div class="empty-state" id="emptyState">
+    <h2>No data yet</h2>
+    <p>Click "Fetch Data" to pull live prices from warframe.market</p>
+  </div>
+</div>
+
+<script>
+// ── State ──
+let allMods = [];
+let filteredMods = [];
+let sortCol = 'oppScore';
+let sortDir = 'desc';
+let isFetching = false;
+
+// ── Mod type classification ──
+function classifyMod(name) {
+  const n = name.toLowerCase();
+  if (n.startsWith('archon ')) return 'Archon';
+  if (n.startsWith('galvanized ')) return 'Galvanized';
+  if (n.startsWith('primed ')) return 'Primed';
+  return 'Regular';
+}
+
+// ── API Fetch with retry logic ──
+async function fetchWithRetry(url, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const resp = await fetch(url);
+    if (resp.status === 429) {
+      const waitMs = 2000 * Math.pow(2, attempt);
+      await new Promise(r => setTimeout(r, waitMs));
+      continue;
+    }
+    return resp;
+  }
+  return { ok: false, status: 429 };
+}
+
+async function startFetch() {
+  if (isFetching) return;
+  isFetching = true;
+  const btn = document.getElementById('fetchBtn');
+  btn.disabled = true;
+  btn.textContent = 'Fetching...';
+  showProgress(true);
+  updateProgress(0, 'Fetching item list...');
+
+  try {
+    const itemsResp = await fetch('/api/v2/items');
+    const itemsJson = await itemsResp.json();
+    const items = itemsJson.data || [];
+
+    // Filter to rank 10 mods only (excluding rivens)
+    const mods = items.filter(item => {
+      const tags = item.tags || [];
+      if (tags.includes('riven_mod')) return false;
+      if (!tags.includes('mod')) return false;
+      return item.maxRank === 10;
+    });
+
+    updateProgress(5, `Found ${mods.length} rank-10 mods. Fetching stats...`);
+
+    const results = [];
+    let completed = 0;
+    let errors = 0;
+    const total = mods.length;
+
+    const WORKERS = 3;
+    const DELAY = 500;
+
+    async function worker(modList) {
+      for (const mod of modList) {
+        try {
+          const resp = await fetchWithRetry(`/api/v1/items/${mod.slug}/statistics`);
+          if (!resp.ok) { errors++; completed++; continue; }
+          const json = await resp.json();
+          const stats48 = json.payload?.statistics_closed?.['48hours'] || [];
+
+          let r0_sma = null, rM_sma = null, r0_vol = 0, rM_vol = 0;
+          const maxRank = mod.maxRank;
+
+          for (const entry of stats48) {
+            if (entry.mod_rank === 0) {
+              r0_sma = entry.moving_avg;
+              r0_vol += entry.volume || 0;
+            } else if (entry.mod_rank === maxRank) {
+              rM_sma = entry.moving_avg;
+              rM_vol += entry.volume || 0;
+            }
+          }
+
+          let flipProfit = null;
+          let oppScore = null;
+          if (r0_sma != null && rM_sma != null) {
+            flipProfit = Math.round((rM_sma - r0_sma) * 10) / 10;
+            if (r0_sma > 0) {
+              oppScore = Math.round(flipProfit * Math.log(rM_vol + 1) * 10) / 10;
+            }
+          }
+
+          const modName = mod.i18n?.en?.name || mod.slug;
+          results.push({
+            name: modName,
+            slug: mod.slug,
+            type: classifyMod(modName),
+            buyPrice: r0_sma,
+            sellPrice: rM_sma,
+            flipProfit,
+            oppScore,
+            maxVol: rM_vol
+          });
+        } catch (e) {
+          errors++;
+        }
+        completed++;
+        if (completed % 10 === 0 || completed === total) {
+          const pct = 5 + (completed / total) * 95;
+          updateProgress(pct, `Fetched ${completed}/${total} mods (${errors} errors)`);
+        }
+        await new Promise(r => setTimeout(r, DELAY));
+      }
+    }
+
+    const chunks = [];
+    for (let i = 0; i < WORKERS; i++) chunks.push([]);
+    mods.forEach((mod, idx) => chunks[idx % WORKERS].push(mod));
+
+    await Promise.all(chunks.map(chunk => worker(chunk)));
+
+    // Only mods with both R0 and max rank prices (flippable)
+    allMods = results.filter(m => m.buyPrice != null && m.sellPrice != null);
+    allMods.sort((a, b) => (b.oppScore || -9999) - (a.oppScore || -9999));
+
+    const now = new Date();
+    const cacheData = { mods: allMods, fetchedAt: now.toISOString() };
+    try { localStorage.setItem('wf_mod_flip_cache', JSON.stringify(cacheData)); } catch(e) {}
+
+    updateStatus(now);
+    updateProgress(100, `Done! ${allMods.length} mods with price data (${errors} API errors)`);
+    setTimeout(() => showProgress(false), 2000);
+
+    sortCol = 'oppScore';
+    sortDir = 'desc';
+    updateSortHeaders();
+    applyFilters();
+
+  } catch (err) {
+    updateProgress(0, `Error: ${err.message}`);
+    console.error(err);
+  }
+
+  isFetching = false;
+  btn.disabled = false;
+  btn.textContent = 'Fetch Data';
+}
+
+// ── Progress UI ──
+function showProgress(show) {
+  document.getElementById('progressContainer').classList.toggle('active', show);
+}
+function updateProgress(pct, text) {
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressText').textContent = text;
+}
+function updateStatus(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  const timeStr = d.toLocaleString();
+  document.getElementById('statusText').innerHTML = `Last fetched: <span>${timeStr}</span> &middot; <span>${allMods.length}</span> mods`;
+}
+
+// ── Sort ──
+function updateSortHeaders() {
+  document.querySelectorAll('thead th').forEach(th => {
+    th.classList.remove('sorted-asc', 'sorted-desc');
+    if (sortDir !== 'none' && th.dataset.col === sortCol) {
+      th.classList.add(sortDir === 'asc' ? 'sorted-asc' : 'sorted-desc');
+    }
+  });
+}
+
+document.querySelectorAll('thead th').forEach(th => {
+  th.addEventListener('click', () => {
+    if (th.classList.contains('no-sort')) return;
+    const col = th.dataset.col;
+    if (sortCol === col) {
+      // Cycle: desc → asc → none → desc
+      sortDir = sortDir === 'desc' ? 'asc' : sortDir === 'asc' ? 'none' : 'desc';
+    } else {
+      sortCol = col;
+      sortDir = (col === 'name' || col === 'type') ? 'asc' : 'desc';
+    }
+    updateSortHeaders();
+    applyFilters();
+  });
+});
+
+function sortMods(mods) {
+  if (sortDir === 'none') return [...mods];
+  return [...mods].sort((a, b) => {
+    let va = a[sortCol], vb = b[sortCol];
+    if (va == null) va = sortDir === 'asc' ? Infinity : -Infinity;
+    if (vb == null) vb = sortDir === 'asc' ? Infinity : -Infinity;
+    if (typeof va === 'string') {
+      const cmp = va.localeCompare(vb);
+      return sortDir === 'asc' ? cmp : -cmp;
+    }
+    return sortDir === 'asc' ? va - vb : vb - va;
+  });
+}
+
+// ── Filter ──
+function applyFilters() {
+  const nameFilter = document.getElementById('filterName').value.toLowerCase();
+  const minProfit = parseFloat(document.getElementById('filterMinProfit').value) || null;
+  const minOpp = parseFloat(document.getElementById('filterMinOpp').value) || null;
+  const minSell = parseFloat(document.getElementById('filterMinSell').value) || null;
+  const minVol = parseFloat(document.getElementById('filterMinVol').value) || null;
+
+  const typeChecks = {};
+  document.querySelectorAll('.type-chip input').forEach(cb => {
+    const type = cb.closest('.type-chip').classList.contains('archon') ? 'Archon' :
+                 cb.closest('.type-chip').classList.contains('galvanized') ? 'Galvanized' :
+                 cb.closest('.type-chip').classList.contains('primed') ? 'Primed' : 'Regular';
+    typeChecks[type] = cb.checked;
+  });
+
+  filteredMods = allMods.filter(m => {
+    if (nameFilter && !m.name.toLowerCase().includes(nameFilter)) return false;
+    if (!typeChecks[m.type]) return false;
+    if (minProfit != null && (m.flipProfit == null || m.flipProfit < minProfit)) return false;
+    if (minOpp != null && (m.oppScore == null || m.oppScore < minOpp)) return false;
+    if (minSell != null && (m.sellPrice == null || m.sellPrice < minSell)) return false;
+    if (minVol != null && (m.maxVol == null || m.maxVol < minVol)) return false;
+    return true;
+  });
+
+  filteredMods = sortMods(filteredMods);
+  renderTable();
+}
+
+// ── Render Table ──
+function renderTable() {
+  const tbody = document.getElementById('tableBody');
+  const empty = document.getElementById('emptyState');
+
+  if (filteredMods.length === 0 && allMods.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    document.getElementById('resultCount').innerHTML = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  document.getElementById('resultCount').innerHTML =
+    `Showing <span>${filteredMods.length}</span> of <span>${allMods.length}</span> mods`;
+
+  const rows = [];
+  filteredMods.forEach((m, i) => {
+    const typeCls = 'type-' + m.type.toLowerCase();
+    const profitCls = m.flipProfit != null ? (m.flipProfit >= 80 ? 'profit-high' : m.flipProfit >= 60 ? 'profit-mid' : 'profit-low') : '';
+    const oppCls = m.oppScore != null ? (m.oppScore >= 300 ? 'opp-high' : m.oppScore >= 250 ? 'opp-mid' : 'opp-low') : '';
+
+    rows.push(`<tr>
+      <td class="num rank-col">${i + 1}</td>
+      <td>${esc(m.name)}</td>
+      <td><span class="type-badge ${typeCls}">${m.type}</span></td>
+      <td class="num">${fmt(m.buyPrice)}</td>
+      <td class="num">${fmt(m.sellPrice)}</td>
+      <td class="num ${profitCls}">${fmt(m.flipProfit)}</td>
+      <td class="num ${oppCls}">${fmt(m.oppScore)}</td>
+      <td class="num">${m.maxVol}</td>
+      <td><a class="mod-link" href="https://warframe.market/items/${m.slug}" target="_blank">View</a></td>
+    </tr>`);
+  });
+
+  tbody.innerHTML = rows.join('');
+}
+
+function fmt(val) {
+  if (val == null) return '\u2014';
+  return Number.isInteger(val) ? val.toLocaleString() : val.toFixed(1);
+}
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+// ── Init: Load cache, only auto-fetch if stale (>24hrs) or empty ──
+(function init() {
+  let cacheAge = Infinity;
+  try {
+    const cached = localStorage.getItem('wf_mod_flip_cache');
+    if (cached) {
+      const data = JSON.parse(cached);
+      allMods = data.mods || [];
+      updateStatus(data.fetchedAt);
+      sortCol = 'oppScore';
+      sortDir = 'desc';
+      updateSortHeaders();
+      applyFilters();
+      cacheAge = Date.now() - new Date(data.fetchedAt).getTime();
+    }
+  } catch (e) {}
+
+  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+  if (cacheAge > TWENTY_FOUR_HOURS || allMods.length === 0) {
+    startFetch();
+  }
+})();
+</script>
+</body>
+</html>
