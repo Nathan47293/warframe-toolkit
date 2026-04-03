@@ -531,7 +531,7 @@ async function startFetch() {
             const sellOrders = orders.filter(o =>
               o.order_type === 'sell' &&
               o.mod_rank === 10 &&
-              (o.user?.status === 'ingame' || o.user?.status === 'online')
+              o.user?.status === 'ingame'
             );
             if (sellOrders.length > 0) {
               const minPrice = Math.min(...sellOrders.map(o => o.platinum));
