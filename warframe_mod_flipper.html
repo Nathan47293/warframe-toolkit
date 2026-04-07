@@ -486,9 +486,8 @@ async function startFetch() {
               rM_vol += entry.volume || 0;
             }
           }
-          // Use fallback prices when SMA isn't available
+          // Use fallback prices for R0 only (flip tab needs it)
           if (r0_sma == null && r0_fallback != null) r0_sma = r0_fallback;
-          if (rM_sma == null && rM_fallback != null) rM_sma = rM_fallback;
 
           const modName = mod.i18n?.en?.name || mod.slug;
           rawResults.push({
@@ -496,8 +495,7 @@ async function startFetch() {
             slug: mod.slug,
             tags: mod.tags || [],
             r0_sma, rM_sma, r0_vol, rM_vol,
-            r0_hasSMA: r0_sma !== r0_fallback || r0_fallback == null,
-            rM_hasSMA: rM_sma !== rM_fallback || rM_fallback == null
+            rM_avg: rM_fallback
           });
         } catch (e) { errors++; }
         completed++;
@@ -575,12 +573,16 @@ async function startFetch() {
         });
       }
 
-      // Endo tab: needs R10 price (SMA or fallback)
+      // Endo tab: needs R10 price — prefer SMA, then in-game listing, then avg
       let r10Price = m.rM_sma;
-      let priceSource = m.rM_hasSMA ? 'SMA' : 'Avg';
+      let priceSource = 'SMA';
       if (r10Price == null && orderResults.has(m.slug)) {
         r10Price = orderResults.get(m.slug);
         priceSource = 'Listing';
+      }
+      if (r10Price == null && m.rM_avg != null) {
+        r10Price = m.rM_avg;
+        priceSource = 'Avg';
       }
       if (r10Price != null && r10Price > 0) {
         newEndoMods.push({
