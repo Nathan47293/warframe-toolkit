@@ -254,10 +254,11 @@
   }
   .tier-header:first-child { margin-top: 0; }
   .arcane-row {
-    display: grid; grid-template-columns: 1fr 55px 55px 40px; gap: 4px;
+    display: grid; grid-template-columns: 1fr 45px 30px 50px 35px; gap: 4px;
     padding: 2px 0; color: #8899aa; line-height: 1.6;
   }
   .arcane-maxprice { text-align: right; }
+  .arcane-vol { text-align: right; font-size: 11px; }
   .arcane-row.dissolved { opacity: 0.5; }
   .arcane-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .arcane-plat { text-align: right; }
@@ -420,7 +421,8 @@
       <span>Arcane Value</span> = Max Rank Price &divide; (21 or 10) &nbsp;&nbsp;|&nbsp;&nbsp;
       <span>Recycle</span> = Dissolve cheap arcanes &rarr; buy more packs &rarr; repeat
       <br>
-      <span>Total EV</span> = Direct Plat &divide; (1 &minus; Vosfor Recycled &divide; 200)
+      <span>Total EV</span> = Direct Plat &divide; (1 &minus; Vosfor Recycled &divide; 200) &nbsp;&nbsp;|&nbsp;&nbsp;
+      <span>Opportunity</span> = EV &times; ln(Volume + 1) &mdash; balances value with liquidity
     </div>
   </div>
   <div class="filters" id="packsFilters">
@@ -430,6 +432,14 @@
     </div>
     <div style="font-size:11px; color:#667788; margin-left:4px;">
       If max rank price &lt; this, dissolve for vosfor instead of selling
+    </div>
+    <div class="filter-sep"></div>
+    <div class="filter-group">
+      <label>Sort by</label>
+      <select id="packSort" onchange="renderPacks()" style="background:#131a27;color:#e0e0e0;border:1px solid #2a3a4a;border-radius:6px;padding:5px 8px;font-size:12px">
+        <option value="opp">Opportunity</option>
+        <option value="ev">Expected Value</option>
+      </select>
     </div>
   </div>
   <div class="packs-grid" id="packsGrid">
@@ -1214,22 +1224,25 @@ function renderPacks() {
 
   const threshold = parseFloat(document.getElementById('packThreshold')?.value) || 0;
 
-  // Build maps: slug -> max rank price, slug -> unit price, slug -> base vosfor
+  // Build maps: slug -> max rank price, slug -> unit price, slug -> base vosfor, slug -> max rank volume
   const arcaneMaxPrice = {};
   const arcaneUnitPrice = {};
   const arcaneBaseVosfor = {};
+  const arcaneMaxVol = {};
   for (const m of vosforMods) {
     if (m.rankLabel !== 'R0') {
       const maxR = m.rankLabel === 'R5' ? 5 : 3;
       const mult = maxR === 5 ? 21 : 10;
       arcaneMaxPrice[m.slug] = m.price;
       arcaneUnitPrice[m.slug] = m.price / mult;
+      arcaneMaxVol[m.slug] = m.vol || 0;
     }
   }
   for (const m of vosforMods) {
     if (m.rankLabel === 'R0' && !arcaneUnitPrice[m.slug]) {
       arcaneUnitPrice[m.slug] = m.price;
       arcaneMaxPrice[m.slug] = m.price;
+      arcaneMaxVol[m.slug] = m.vol || 0;
     }
   }
   // Base vosfor from VOSFOR_MAP
@@ -1252,9 +1265,10 @@ function renderPacks() {
   const packResults = [];
 
   for (const [collName, coll] of Object.entries(ARCANE_COLLECTIONS)) {
-    // Per-arcane expected plat and vosfor
+    // Per-arcane expected plat, vosfor, and opportunity
     let evPlatPerArcane = 0;
     let evVosforPerArcane = 0;
+    let evOppPerArcane = 0;
     const arcaneRows = []; // individual arcane rows for detailed view
 
     for (const rarity of rarityOrder) {
@@ -1270,6 +1284,7 @@ function renderPacks() {
         const unitPrice = arcaneUnitPrice[slug];
         const maxPrice = arcaneMaxPrice[slug];
         const baseVosfor = arcaneBaseVosfor[slug] || 0;
+        const vol = arcaneMaxVol[slug] || 0;
         if (unitPrice == null) continue;
         count++;
 
@@ -1283,7 +1298,7 @@ function renderPacks() {
         arcaneDetails.push({
           slug, name: nameMap[slug] || slug.replace(/_/g, ' '),
           rarity, color: rarityColors[rarity],
-          unitPrice, maxPrice, baseVosfor, dissolved
+          unitPrice, maxPrice, baseVosfor, dissolved, vol
         });
       }
 
@@ -1291,6 +1306,15 @@ function renderPacks() {
       const individualChance = perArcaneChance * 100;
       evPlatPerArcane += perArcaneChance * totalPlat;
       evVosforPerArcane += perArcaneChance * totalVosfor;
+
+      // Opportunity: volume-weighted plat contribution
+      let oppContrib = 0;
+      for (const a of arcaneDetails) {
+        if (!a.dissolved) {
+          oppContrib += a.unitPrice * Math.log(a.vol + 1);
+        }
+      }
+      evOppPerArcane += perArcaneChance * oppContrib;
 
       // Sort arcanes within tier by name
       arcaneDetails.sort((a, b) => a.name.localeCompare(b.name));
@@ -1309,11 +1333,17 @@ function renderPacks() {
     const r = recycledVosfor / 200;
     const totalEV = r < 1 ? directPlat / (1 - r) : directPlat;
     const recycledPlat = totalEV - directPlat;
+    const oppScore = evOppPerArcane * 3;
 
-    packResults.push({ name: collName, totalEV, directPlat, recycledPlat, recycledVosfor, ratio: r, arcaneRows });
+    packResults.push({ name: collName, totalEV, directPlat, recycledPlat, recycledVosfor, ratio: r, oppScore, arcaneRows });
   }
 
-  packResults.sort((a, b) => b.totalEV - a.totalEV);
+  const sortBy = document.getElementById('packSort')?.value || 'opp';
+  if (sortBy === 'opp') {
+    packResults.sort((a, b) => b.oppScore - a.oppScore);
+  } else {
+    packResults.sort((a, b) => b.totalEV - a.totalEV);
+  }
 
   if (packResults.length === 0) {
     grid.innerHTML = '<div class="empty-state"><h2>No data yet</h2><p>Click "Fetch Data" to pull live prices from warframe.market</p></div>';
@@ -1336,10 +1366,12 @@ function renderPacks() {
           ? `<span style="color:#667788;font-style:italic">dissolve</span>`
           : `<span style="color:#e0e0e0">${a.unitPrice.toFixed(1)}p</span>`;
         const maxPriceCell = `<span style="color:#b0b8c0">${a.maxPrice != null ? a.maxPrice.toFixed(0) + 'p' : '—'}</span>`;
+        const volCell = `<span style="color:${a.vol >= 20 ? '#4ade80' : a.vol >= 5 ? '#fbbf24' : '#f87171'}">${a.vol}</span>`;
         const vosforCell = `<span style="color:#8899aa">${a.baseVosfor}v</span>`;
         return `<div class="arcane-row${a.dissolved ? ' dissolved' : ''}">
           <span class="arcane-name" style="color:${a.color}">${esc(a.name)}</span>
           <span class="arcane-maxprice">${maxPriceCell}</span>
+          <span class="arcane-vol">${volCell}</span>
           <span class="arcane-plat">${platCell}</span>
           <span class="arcane-vosfor">${vosforCell}</span>
         </div>`;
@@ -1356,11 +1388,21 @@ function renderPacks() {
         </div>`
       : '';
 
+    const oppColor = p.oppScore >= 50 ? '#4ade80' : p.oppScore >= 20 ? '#fbbf24' : '#f87171';
+
     return `<div class="pack-card">
       <div class="pack-card-title">${esc(p.name)} Collection</div>
       <div class="pack-card-cost">200 vosfor &bull; 3 arcanes</div>
-      <div class="pack-ev" style="color:${evColor}">${p.totalEV.toFixed(1)}p</div>
-      <div class="pack-ev-label">Total Expected Value per Pack</div>
+      <div style="display:flex;align-items:baseline;gap:16px">
+        <div>
+          <div class="pack-ev" style="color:${evColor}">${p.totalEV.toFixed(1)}p</div>
+          <div class="pack-ev-label">Expected Value</div>
+        </div>
+        <div>
+          <div class="pack-ev" style="color:${oppColor};font-size:22px">${p.oppScore.toFixed(0)}</div>
+          <div class="pack-ev-label">Opportunity</div>
+        </div>
+      </div>
       ${evBreakdown}
       <div class="pack-arcane-list" style="margin-top:10px">${tierSections}</div>
     </div>`;
