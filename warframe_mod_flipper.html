@@ -336,6 +336,12 @@
     <div class="filter-group"><label>Min Opp Score</label><input type="number" id="flipMinOpp" placeholder="0" oninput="applyFlipFilters()"></div>
     <div class="filter-group"><label>Min Sell Price</label><input type="number" id="flipMinSell" placeholder="0" oninput="applyFlipFilters()"></div>
     <div class="filter-group"><label>Min Volume</label><input type="number" id="flipMinVol" placeholder="0" oninput="applyFlipFilters()"></div>
+    <div class="filter-sep"></div>
+    <div class="filter-group">
+      <label>Endo/Plat</label>
+      <input type="number" id="flipEndoPerPlat" placeholder="e.g. 400" step="1" style="width:80px" oninput="recalcSimProfits()">
+      <span style="font-size:10px;color:#556">sim cost basis</span>
+    </div>
     <div class="result-count" id="flipResultCount"></div>
   </div>
   <div class="table-wrapper">
@@ -350,6 +356,8 @@
         <th data-col="oppScore" class="num">Opp Score</th>
         <th data-col="maxVol" class="num">R10 Volume</th>
         <th data-col="link" class="no-sort">Link</th>
+        <th class="no-sort num">Sim R0</th>
+        <th class="no-sort num">Sim Profit</th>
       </tr></thead>
       <tbody id="flipBody"></tbody>
     </table>
@@ -404,6 +412,8 @@
         <th data-col="maxVol" class="num">R10 Volume</th>
         <th data-col="priceSource">Source</th>
         <th data-col="link" class="no-sort">Link</th>
+        <th class="no-sort num">Sim Price</th>
+        <th class="no-sort num">Sim E/P</th>
       </tr></thead>
       <tbody id="endoBody"></tbody>
     </table>
@@ -492,6 +502,8 @@
         <th data-col="vol" class="num">Volume</th>
         <th data-col="priceSource">Source</th>
         <th data-col="link" class="no-sort">Link</th>
+        <th class="no-sort num">Sim Price</th>
+        <th class="no-sort num">Sim V/P</th>
       </tr></thead>
       <tbody id="vosforBody"></tbody>
     </table>
@@ -519,12 +531,20 @@ let vosforSort = { col: 'vosforPerPlat', dir: 'desc' };
 let isFetching = false;
 let activeTab = 'flip';
 
-// Endo return values per tier
+// Endo returned when dissolving an R10 mod
 const ENDO_VALUES = {
   'Primed/Archon': 30710,
   'Galv/Gold': 23033,
   'Silver': 15355,
   'Bronze': 7678
+};
+
+// Endo required to rank a mod from R0 to R10
+const ENDO_COSTS = {
+  'Primed/Archon': 40920,
+  'Galv/Gold': 30690,
+  'Silver': 20460,
+  'Bronze': 10230
 };
 
 // Vosfor values per arcane (R0, from spreadsheet)
@@ -862,6 +882,7 @@ async function startFetch() {
       const flipType = classifyFlipType(m.name);
       const endoTier = classifyEndoTier(m.name, m.tags);
       const endoReturn = ENDO_VALUES[endoTier] || 0;
+      const endoRankCost = ENDO_COSTS[endoTier] || 0;
 
       if (r0.sma != null && r10.sma != null) {
         const flipProfit = Math.round((r10.sma - r0.sma) * 10) / 10;
@@ -869,7 +890,8 @@ async function startFetch() {
         newFlipMods.push({
           name: m.name, slug: m.slug, type: flipType,
           buyPrice: r0.sma, sellPrice: r10.sma,
-          flipProfit, oppScore, maxVol: r10.vol
+          flipProfit, oppScore, maxVol: r10.vol,
+          endoCost: endoRankCost
         });
       }
 
@@ -1084,9 +1106,36 @@ function renderFlipTable() {
       <td class="num ${oppCls}">${fmt(m.oppScore)}</td>
       <td class="num">${m.maxVol}</td>
       <td><a class="mod-link" href="https://warframe.market/items/${m.slug}" target="_blank">View</a></td>
+      <td class="num"><input type="number" class="sim-price-input sim-r0-input" data-sell="${m.sellPrice}" data-endo="${m.endoCost}" step="0.1" placeholder="—" style="width:60px;background:#131a27;color:#e0e0e0;border:1px solid #2a3a4a;border-radius:4px;padding:3px 5px;font-size:12px;text-align:right" oninput="updateSimProfit(this)"></td>
+      <td class="num sim-profit-cell" style="color:#556">—</td>
     </tr>`);
   });
   tbody.innerHTML = rows.join('');
+}
+
+function updateSimProfit(input) {
+  const cell = input.closest('tr').querySelector('.sim-profit-cell');
+  const sellPrice = parseFloat(input.dataset.sell) || 0;
+  const endoCost = parseFloat(input.dataset.endo) || 0;
+  const r0Price = parseFloat(input.value);
+  const endoPerPlat = parseFloat(document.getElementById('flipEndoPerPlat')?.value) || 0;
+
+  if (!r0Price || r0Price <= 0 || sellPrice <= 0) {
+    cell.textContent = '—';
+    cell.style.color = '#556';
+    return;
+  }
+
+  const endoCostPlat = endoPerPlat > 0 ? endoCost / endoPerPlat : 0;
+  const profit = sellPrice - r0Price - endoCostPlat;
+  cell.textContent = profit.toFixed(1) + 'p';
+  cell.style.color = profit >= 80 ? '#4ade80' : profit >= 30 ? '#fbbf24' : '#f87171';
+}
+
+function recalcSimProfits() {
+  document.querySelectorAll('.sim-r0-input').forEach(input => {
+    if (input.value) updateSimProfit(input);
+  });
 }
 
 // ═══════════════════════════════════════════
@@ -1147,9 +1196,25 @@ function renderEndoTable() {
       <td class="num">${m.maxVol}</td>
       <td><span class="price-source">${m.priceSource}</span></td>
       <td><a class="mod-link" href="https://warframe.market/items/${m.slug}" target="_blank">View</a></td>
+      <td class="num"><input type="number" class="sim-price-input" data-endo="${m.endoReturn}" step="0.1" placeholder="—" style="width:60px;background:#131a27;color:#e0e0e0;border:1px solid #2a3a4a;border-radius:4px;padding:3px 5px;font-size:12px;text-align:right" oninput="updateSimEP(this)"></td>
+      <td class="num sim-ep-cell" style="color:#556">—</td>
     </tr>`);
   });
   tbody.innerHTML = rows.join('');
+}
+
+function updateSimEP(input) {
+  const cell = input.closest('tr').querySelector('.sim-ep-cell');
+  const endo = parseFloat(input.dataset.endo) || 0;
+  const price = parseFloat(input.value);
+  if (!price || price <= 0 || endo === 0) {
+    cell.textContent = '—';
+    cell.style.color = '#556';
+    return;
+  }
+  const ep = endo / price;
+  cell.textContent = ep.toFixed(1);
+  cell.style.color = ep >= 500 ? '#4ade80' : ep >= 300 ? '#fbbf24' : '#f87171';
 }
 
 // ═══════════════════════════════════════════
@@ -1212,9 +1277,25 @@ function renderVosforTable() {
       <td class="num">${m.vol}</td>
       <td><span class="price-source">${m.priceSource}</span></td>
       <td><a class="mod-link" href="https://warframe.market/items/${m.slug}" target="_blank">View</a></td>
+      <td class="num"><input type="number" class="sim-price-input" data-vosfor="${m.vosforReturn}" step="0.1" placeholder="—" style="width:60px;background:#131a27;color:#e0e0e0;border:1px solid #2a3a4a;border-radius:4px;padding:3px 5px;font-size:12px;text-align:right" oninput="updateSimVP(this)"></td>
+      <td class="num sim-vp-cell" style="color:#556">—</td>
     </tr>`);
   });
   tbody.innerHTML = rows.join('');
+}
+
+function updateSimVP(input) {
+  const cell = input.closest('tr').querySelector('.sim-vp-cell');
+  const vosfor = parseFloat(input.dataset.vosfor) || 0;
+  const price = parseFloat(input.value);
+  if (!price || price <= 0 || vosfor === 0) {
+    cell.textContent = '—';
+    cell.style.color = '#556';
+    return;
+  }
+  const vp = vosfor / price;
+  cell.textContent = vp.toFixed(1);
+  cell.style.color = vp >= 15 ? '#4ade80' : vp >= 8 ? '#fbbf24' : '#f87171';
 }
 
 // ═══════════════════════════════════════════
