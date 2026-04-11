@@ -1,4 +1,4 @@
-# Warframe Mod Toolkit
+# Warframe Toolkit
 
 A local web app that fetches live price data from [warframe.market](https://warframe.market) to help you make smarter mod and arcane trading decisions.
 
