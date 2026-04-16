@@ -144,6 +144,7 @@
   .type-chip.galvanized input:checked + .chip { background: #d97706; color: #fff; }
   .type-chip.primed input:checked + .chip { background: #0ea5e9; color: #fff; }
   .type-chip.regular input:checked + .chip { background: #4b5563; color: #fff; }
+  .type-chip.gold input:checked + .chip { background: #d97706; color: #fff; }
   .type-chip.primed-archon input:checked + .chip { background: #7c3aed; color: #fff; }
   .type-chip.galv-gold input:checked + .chip { background: #d97706; color: #fff; }
   .type-chip.silver input:checked + .chip { background: #94a3b8; color: #0a0a14; }
@@ -311,11 +312,14 @@
   <div class="tab-header">
     <h2>Mod Flipper</h2>
     <div class="formula-text">
-      <span>Flip Profit</span> = Sell SMA - Buy SMA &nbsp;&nbsp;|&nbsp;&nbsp;
-      <span>Opp Score</span> = Flip Profit &times; ln(R10 Volume + 1)
+      <span>Flip Profit</span> = Sell SMA &minus; Buy SMA &nbsp;&nbsp;|&nbsp;&nbsp;
+      <span>Plat/1k Endo</span> = Flip Profit &divide; Endo Cost &times; 1000 &nbsp;&nbsp;|&nbsp;&nbsp;
+      <span>Value Score</span> = 0.6 &times; Plat/1k Endo rank + 0.4 &times; min(Volume/42, 1) &times; 100
+      <br>
+      <span>Endo to R10:</span> Primed/Archon 40,920 &nbsp;|&nbsp; Galv/Gold 30,690 &nbsp;|&nbsp; Silver 20,460 &nbsp;|&nbsp; Bronze 10,230
       <br>
       <span>Profit Color:</span> &ge;80 green, &ge;60 yellow, &lt;60 red &nbsp;&nbsp;|&nbsp;&nbsp;
-      <span>Opp Color:</span> &ge;300 green, &ge;250 yellow, &lt;250 red
+      <span>Value Color:</span> &ge;75 green, &ge;50 yellow, &lt;50 red
     </div>
   </div>
   <div class="filters" id="flipFilters">
@@ -329,11 +333,13 @@
       <label class="type-chip archon"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Archon</span></label>
       <label class="type-chip galvanized"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Galvanized</span></label>
       <label class="type-chip primed"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Primed</span></label>
-      <label class="type-chip regular"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Regular</span></label>
+      <label class="type-chip gold"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Gold</span></label>
+      <label class="type-chip silver"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Silver</span></label>
+      <label class="type-chip bronze"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Bronze</span></label>
     </div>
     <div class="filter-sep"></div>
     <div class="filter-group"><label>Min Profit</label><input type="number" id="flipMinProfit" placeholder="0" oninput="applyFlipFilters()"></div>
-    <div class="filter-group"><label>Min Opp Score</label><input type="number" id="flipMinOpp" placeholder="0" oninput="applyFlipFilters()"></div>
+    <div class="filter-group"><label>Min Value Score</label><input type="number" id="flipMinOpp" placeholder="0" oninput="applyFlipFilters()"></div>
     <div class="filter-group"><label>Min Sell Price</label><input type="number" id="flipMinSell" placeholder="0" oninput="applyFlipFilters()"></div>
     <div class="filter-group"><label>Min Volume</label><input type="number" id="flipMinVol" placeholder="0" oninput="applyFlipFilters()"></div>
     <div class="filter-sep"></div>
@@ -353,7 +359,9 @@
         <th data-col="buyPrice" class="num">Buy (R0)</th>
         <th data-col="sellPrice" class="num">Sell (R10)</th>
         <th data-col="flipProfit" class="num">Flip Profit</th>
-        <th data-col="oppScore" class="num">Opp Score</th>
+        <th data-col="endoCost" class="num">Endo</th>
+        <th data-col="platPerEndo" class="num">Plat/1k Endo</th>
+        <th data-col="valueScore" class="num">Value Score</th>
         <th data-col="maxVol" class="num">R10 Volume</th>
         <th data-col="link" class="no-sort">Link</th>
         <th class="no-sort num">Sim R0</th>
@@ -695,12 +703,15 @@ function switchTab(tab) {
 // ═══════════════════════════════════════════
 // CLASSIFICATION
 // ═══════════════════════════════════════════
-function classifyFlipType(name) {
+function classifyFlipType(name, tags) {
   const n = name.toLowerCase();
   if (n.startsWith('archon ')) return 'Archon';
   if (n.startsWith('galvanized ')) return 'Galvanized';
   if (n.startsWith('primed ')) return 'Primed';
-  return 'Regular';
+  if (tags.includes('rare')) return 'Gold';
+  if (tags.includes('uncommon')) return 'Silver';
+  if (tags.includes('common')) return 'Bronze';
+  return 'Gold'; // fallback
 }
 
 function classifyEndoTier(name, tags) {
@@ -879,19 +890,19 @@ async function startFetch() {
 
     for (const m of modResults) {
       const r0 = m.priceData[0], r10 = m.priceData[10];
-      const flipType = classifyFlipType(m.name);
+      const flipType = classifyFlipType(m.name, m.tags);
       const endoTier = classifyEndoTier(m.name, m.tags);
       const endoReturn = ENDO_VALUES[endoTier] || 0;
       const endoRankCost = ENDO_COSTS[endoTier] || 0;
 
       if (r0.sma != null && r10.sma != null) {
         const flipProfit = Math.round((r10.sma - r0.sma) * 10) / 10;
-        const oppScore = r0.sma > 0 ? Math.round(flipProfit * Math.log(r10.vol + 1) * 10) / 10 : null;
+        const platPerEndo = endoRankCost > 0 ? flipProfit / endoRankCost : 0;
         newFlipMods.push({
           name: m.name, slug: m.slug, type: flipType,
           buyPrice: r0.sma, sellPrice: r10.sma,
-          flipProfit, oppScore, maxVol: r10.vol,
-          endoCost: endoRankCost
+          flipProfit, valueScore: 0, maxVol: r10.vol,
+          endoCost: endoRankCost, platPerEndo
         });
       }
 
@@ -946,7 +957,8 @@ async function startFetch() {
     flipMods = newFlipMods;
     endoMods = newEndoMods;
     vosforMods = newVosforMods;
-    flipMods.sort((a, b) => (b.oppScore || -9999) - (a.oppScore || -9999));
+    computeValueScores(flipMods);
+    flipMods.sort((a, b) => (b.valueScore || -9999) - (a.valueScore || -9999));
     endoMods.sort((a, b) => (b.endoPerPlat || 0) - (a.endoPerPlat || 0));
     vosforMods.sort((a, b) => (b.vosforPerPlat || 0) - (a.vosforPerPlat || 0));
 
@@ -1062,7 +1074,8 @@ function applyFlipFilters() {
   document.querySelectorAll('#flipFilters .type-chip input').forEach(cb => {
     const cls = cb.closest('.type-chip').className;
     const type = cls.includes('archon') ? 'Archon' : cls.includes('galvanized') ? 'Galvanized' :
-                 cls.includes('primed') ? 'Primed' : 'Regular';
+                 cls.includes('primed') ? 'Primed' : cls.includes('gold') ? 'Gold' :
+                 cls.includes('silver') ? 'Silver' : 'Bronze';
     typeChecks[type] = cb.checked;
   });
 
@@ -1070,7 +1083,7 @@ function applyFlipFilters() {
     if (name && !m.name.toLowerCase().includes(name)) return false;
     if (!typeChecks[m.type]) return false;
     if (minProfit != null && (m.flipProfit == null || m.flipProfit < minProfit)) return false;
-    if (minOpp != null && (m.oppScore == null || m.oppScore < minOpp)) return false;
+    if (minOpp != null && (m.valueScore == null || m.valueScore < minOpp)) return false;
     if (minSell != null && (m.sellPrice == null || m.sellPrice < minSell)) return false;
     if (minVol != null && m.maxVol < minVol) return false;
     return true;
@@ -1078,6 +1091,23 @@ function applyFlipFilters() {
 
   flipFiltered = sortData(flipFiltered, flipSort);
   renderFlipTable();
+}
+
+function computeValueScores(mods) {
+  if (mods.length === 0) return;
+  const n = mods.length;
+  const rank = (arr) => {
+    const sorted = arr.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+    const ranks = new Array(n);
+    sorted.forEach((item, pos) => { ranks[item.i] = pos / (n - 1 || 1); });
+    return ranks;
+  };
+  const endoRanks = rank(mods.map(m => m.platPerEndo || 0));
+  // Volume as raw 0–1 score, capped at 42 (1 trade/hr avg over 48hrs)
+  const volScores = mods.map(m => Math.min((m.maxVol || 0) / 42, 1));
+  for (let i = 0; i < n; i++) {
+    mods[i].valueScore = Math.round((endoRanks[i] * 0.6 + volScores[i] * 0.4) * 100 * 10) / 10;
+  }
 }
 
 function renderFlipTable() {
@@ -1095,7 +1125,7 @@ function renderFlipTable() {
   flipFiltered.forEach((m, i) => {
     const typeCls = 'type-' + m.type.toLowerCase();
     const profitCls = m.flipProfit != null ? (m.flipProfit >= 80 ? 'profit-high' : m.flipProfit >= 60 ? 'profit-mid' : 'profit-low') : '';
-    const oppCls = m.oppScore != null ? (m.oppScore >= 300 ? 'opp-high' : m.oppScore >= 250 ? 'opp-mid' : 'opp-low') : '';
+    const valCls = m.valueScore >= 75 ? 'opp-high' : m.valueScore >= 50 ? 'opp-mid' : 'opp-low';
     rows.push(`<tr>
       <td class="num rank-col">${i+1}</td>
       <td>${esc(m.name)}</td>
@@ -1103,7 +1133,9 @@ function renderFlipTable() {
       <td class="num">${fmt(m.buyPrice)}</td>
       <td class="num">${fmt(m.sellPrice)}</td>
       <td class="num ${profitCls}">${fmt(m.flipProfit)}</td>
-      <td class="num ${oppCls}">${fmt(m.oppScore)}</td>
+      <td class="num">${m.endoCost.toLocaleString()}</td>
+      <td class="num">${(m.platPerEndo * 1000).toFixed(2)}</td>
+      <td class="num ${valCls}">${fmt(m.valueScore)}</td>
       <td class="num">${m.maxVol}</td>
       <td><a class="mod-link" href="https://warframe.market/items/${m.slug}" target="_blank">View</a></td>
       <td class="num"><input type="number" class="sim-price-input sim-r0-input" data-sell="${m.sellPrice}" data-endo="${m.endoCost}" step="0.1" placeholder="—" style="width:60px;background:#131a27;color:#e0e0e0;border:1px solid #2a3a4a;border-radius:4px;padding:3px 5px;font-size:12px;text-align:right" oninput="updateSimProfit(this)"></td>
@@ -1541,6 +1573,7 @@ attachSortHandlers('vosforThead', 'vosfor');
       flipMods = data.flipMods || [];
       endoMods = data.endoMods || [];
       vosforMods = data.vosforMods || [];
+      computeValueScores(flipMods);
       updateStatus(data.fetchedAt);
       applyFlipFilters();
       applyEndoFilters();
