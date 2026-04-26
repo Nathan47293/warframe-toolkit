@@ -1,8 +1,10 @@
 # Warframe Toolkit
 
+> **Live: [nathan47293.github.io/warframe-toolkit](https://nathan47293.github.io/warframe-toolkit/)** — no install, just bookmark the URL.
+
 A static web app that fetches live price data from [warframe.market](https://warframe.market) to help make smarter mod and arcane trading decisions in Warframe.
 
-Hosted on GitHub Pages with a Cloudflare Worker handling the warframe.market CORS proxy. No install — just bookmark the URL.
+Hosted on GitHub Pages with a Cloudflare Worker handling the warframe.market CORS proxy.
 
 ## Tools
 
