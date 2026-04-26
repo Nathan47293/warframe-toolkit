@@ -25,14 +25,45 @@
     height: 100vh;
     position: sticky;
     top: 0;
+    transition: width 0.18s ease, min-width 0.18s ease;
+  }
+  .sidebar-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 12px 10px; gap: 8px;
   }
   .sidebar-title {
-    padding: 20px 16px 12px;
     font-size: 14px;
     font-weight: 700;
     color: #00e5ff;
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
+  .sidebar-toggle {
+    background: transparent;
+    border: 1px solid #1e2a3a;
+    color: #8899aa;
+    cursor: pointer;
+    width: 24px; height: 24px;
+    border-radius: 4px;
+    font-size: 16px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .sidebar-toggle:hover { background: #161b26; color: #00e5ff; border-color: #2a3a4a; }
+  .sidebar-toggle::before { content: "\2039"; }
+  .sidebar.collapsed { width: 56px; min-width: 56px; }
+  .sidebar.collapsed .sidebar-header { justify-content: center; padding: 18px 0 10px; }
+  .sidebar.collapsed .sidebar-title { display: none; }
+  .sidebar.collapsed .sidebar-toggle::before { content: "\203A"; }
+  .sidebar.collapsed .nav-label,
+  .sidebar.collapsed .fetch-label,
+  .sidebar.collapsed .sidebar-status { display: none; }
+  .sidebar.collapsed .nav-item { padding: 10px 0; justify-content: center; }
+  .sidebar.collapsed .fetch-btn { padding: 8px 0; }
+  .sidebar.collapsed .sidebar-footer { padding: 16px 4px; }
   .sidebar-nav { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
   .nav-item {
     padding: 10px 12px;
@@ -142,37 +173,23 @@
   .type-chip input:checked + .chip { border-color: transparent; }
   .type-chip.archon input:checked + .chip { background: #7c3aed; color: #fff; }
   .type-chip.galvanized input:checked + .chip { background: #d97706; color: #fff; }
-  .type-chip.primed input:checked + .chip { background: #0ea5e9; color: #fff; }
+  .type-chip.primed input:checked + .chip { background: #ebe8da; color: #0a0a14; }
   .type-chip.regular input:checked + .chip { background: #4b5563; color: #fff; }
-  .type-chip.gold input:checked + .chip { background: #d97706; color: #fff; }
-  .type-chip.primed-archon input:checked + .chip { background: #7c3aed; color: #fff; }
-  .type-chip.galv-gold input:checked + .chip { background: #d97706; color: #fff; }
-  .type-chip.silver input:checked + .chip { background: #94a3b8; color: #0a0a14; }
-  .type-chip.bronze input:checked + .chip { background: #b45309; color: #fff; }
-  .type-chip.legendary input:checked + .chip { background: #c0c0c0; color: #0a0a14; }
+  .type-chip.rare input:checked + .chip { background: #d97706; color: #fff; }
+  .type-chip.archon-primed input:checked + .chip { background: #ebe8da; color: #0a0a14; }
+  .type-chip.galv-rare input:checked + .chip { background: #d97706; color: #fff; }
+  .type-chip.uncommon input:checked + .chip { background: #94a3b8; color: #0a0a14; }
+  .type-chip.common input:checked + .chip { background: #b45309; color: #fff; }
+  .type-chip.legendary input:checked + .chip { background: #e6e2d3; color: #0a0a14; }
   .type-chip.rare-arc input:checked + .chip { background: #d97706; color: #fff; }
   .type-chip.uncommon-arc input:checked + .chip { background: #94a3b8; color: #0a0a14; }
   .type-chip.common-arc input:checked + .chip { background: #b45309; color: #fff; }
-  .type-chip.tektolyst input:checked + .chip { background: #dc2626; color: #fff; }
+  .type-chip.tektolyst input:checked + .chip { background: #b54545; color: #fff; }
   .type-chip input:not(:checked) + .chip { color: #667; }
 
   .filter-sep { width: 1px; height: 24px; background: #2a3a4a; }
   .result-count { font-size: 12px; color: #8899aa; margin-left: auto; }
   .result-count span { color: #00e5ff; font-weight: 700; }
-
-  /* ── Endo Info Bar ── */
-  .endo-info {
-    background: #0d1117;
-    border-bottom: 1px solid #1e2a3a;
-    padding: 10px 28px;
-    display: flex; gap: 24px; flex-wrap: wrap;
-  }
-  .endo-tier {
-    font-size: 12px; color: #8899aa;
-    font-family: 'Consolas', 'Courier New', monospace;
-  }
-  .endo-tier .tier-name { font-weight: 700; }
-  .endo-tier .tier-val { color: #00e5ff; }
 
   /* ── Table ── */
   .table-wrapper { overflow: auto; flex: 1; padding: 0 16px 20px; }
@@ -189,6 +206,23 @@
   thead th.sorted-desc::after { content: ' \25BC'; color: #00e5ff; }
   thead th.no-sort { cursor: default; }
   thead th.no-sort:hover { color: #8899aa; }
+  /* Per-column filter inputs embedded in the th */
+  .col-filter {
+    display: block; width: 100%; margin-top: 4px;
+    background: #0d1117; color: #e0e0e0;
+    border: 1px solid #2a3a4a; border-radius: 3px;
+    padding: 2px 4px; font-size: 11px;
+    text-align: right; font-family: inherit;
+    font-weight: normal; letter-spacing: normal; text-transform: none;
+  }
+  .col-filter:focus { outline: none; border-color: #00b4d8; }
+  .col-filter::placeholder { color: #556; opacity: 1; }
+  .th-label { display: block; }
+  thead th:has(.col-filter) { vertical-align: top; }
+  thead th:has(.col-filter).sorted-asc::after,
+  thead th:has(.col-filter).sorted-desc::after { content: ''; }
+  thead th:has(.col-filter).sorted-asc .th-label::after { content: ' \25B2'; color: #00e5ff; }
+  thead th:has(.col-filter).sorted-desc .th-label::after { content: ' \25BC'; color: #00e5ff; }
 
   tbody tr { border-bottom: 1px solid #141c28; transition: background 0.15s; }
   tbody tr:hover { background: #131a27; }
@@ -202,14 +236,14 @@
   .type-galvanized { background: #d9770622; color: #fbbf24; border: 1px solid #d9770644; }
   .type-primed { background: #0ea5e922; color: #38bdf8; border: 1px solid #0ea5e944; }
   .type-regular { background: #4b556322; color: #9ca3af; border: 1px solid #4b556344; }
-  .type-gold { background: #d9770622; color: #fbbf24; border: 1px solid #d9770644; }
-  .type-silver { background: #94a3b822; color: #cbd5e1; border: 1px solid #94a3b844; }
-  .type-bronze { background: #b4530922; color: #f59e0b; border: 1px solid #b4530944; }
-  .type-legendary { background: #c0c0c022; color: #e0e0e0; border: 1px solid #c0c0c044; }
+  .type-rare { background: #d9770622; color: #fbbf24; border: 1px solid #d9770644; }
+  .type-uncommon { background: #94a3b822; color: #cbd5e1; border: 1px solid #94a3b844; }
+  .type-common { background: #b4530922; color: #f59e0b; border: 1px solid #b4530944; }
+  .type-legendary { background: #e6e2d322; color: #f0ecdc; border: 1px solid #e6e2d344; }
   .type-rare-arc { background: #d9770622; color: #fbbf24; border: 1px solid #d9770644; }
   .type-uncommon-arc { background: #94a3b822; color: #cbd5e1; border: 1px solid #94a3b844; }
   .type-common-arc { background: #b4530922; color: #f59e0b; border: 1px solid #b4530944; }
-  .type-tektolyst { background: #dc262622; color: #f87171; border: 1px solid #dc262644; }
+  .type-tektolyst { background: #b5454522; color: #d97777; border: 1px solid #b5454544; }
 
   .profit-high { color: #4ade80; font-weight: 600; }
   .profit-mid { color: #fbbf24; }
@@ -255,15 +289,22 @@
   }
   .tier-header:first-child { margin-top: 0; }
   .arcane-row {
-    display: grid; grid-template-columns: 1fr 45px 30px 50px 35px; gap: 4px;
-    padding: 2px 0; color: #8899aa; line-height: 1.6;
+    display: grid; grid-template-columns: 1fr 55px 30px 50px 35px; gap: 4px;
+    padding: 2px 8px 2px 0; color: #8899aa; line-height: 1.6;
   }
   .arcane-maxprice { text-align: right; }
   .arcane-vol { text-align: right; font-size: 11px; }
   .arcane-row.dissolved { opacity: 0.5; }
-  .arcane-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .arcane-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .arcane-plat { text-align: right; }
   .arcane-vosfor { text-align: right; }
+  .arcane-header {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;
+    color: #667788; border-bottom: 1px solid #1e2a3a; padding-bottom: 3px;
+    font-weight: 600;
+  }
+  .arcane-header .arcane-vol { font-size: inherit; }
+  .arcane-header.dissolved { opacity: 1; }
   .pack-no-data { color: #556; font-size: 12px; font-style: italic; }
 
   ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -275,24 +316,27 @@
 <body>
 
 <!-- Sidebar -->
-<div class="sidebar">
-  <div class="sidebar-title">WF Mod Toolkit</div>
+<div class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-title">WF Mod Toolkit</div>
+    <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" title="Collapse sidebar" aria-label="Toggle sidebar"></button>
+  </div>
   <div class="sidebar-nav">
     <div class="nav-item active" onclick="switchTab('flip')" id="navFlip">
-      <span class="nav-icon">&#9650;</span> Mod Flipper
+      <span class="nav-icon">&#9650;</span> <span class="nav-label">Mod Flipper</span>
     </div>
     <div class="nav-item" onclick="switchTab('endo')" id="navEndo">
-      <span class="nav-icon">&#9881;</span> Endo Dissolve
+      <span class="nav-icon">&#9881;</span> <span class="nav-label">Endo Dissolve</span>
     </div>
     <div class="nav-item" onclick="switchTab('vosfor')" id="navVosfor">
-      <span class="nav-icon">&#9733;</span> Vosfor Dissolve
+      <span class="nav-icon">&#9733;</span> <span class="nav-label">Vosfor Dissolve</span>
     </div>
     <div class="nav-item" onclick="switchTab('packs')" id="navPacks">
-      <span class="nav-icon">&#9830;</span> Arcane Packs
+      <span class="nav-icon">&#9830;</span> <span class="nav-label">Arcane Packs</span>
     </div>
   </div>
   <div style="padding: 12px 8px;">
-    <button class="fetch-btn" id="fetchBtn" onclick="startFetch()">&#8635; Fetch Data</button>
+    <button class="fetch-btn" id="fetchBtn" onclick="startFetch()"><span class="fetch-icon">&#8635;</span><span class="fetch-label"> Fetch Data</span></button>
   </div>
   <div class="sidebar-footer">
     <div class="sidebar-status" id="statusText">No data loaded</div>
@@ -314,11 +358,13 @@
     <div class="formula-text">
       <span>Flip Profit</span> = Sell SMA &minus; Buy SMA &nbsp;&nbsp;|&nbsp;&nbsp;
       <span>Plat/1k Endo</span> = Flip Profit &divide; Endo Cost &times; 1000 &nbsp;&nbsp;|&nbsp;&nbsp;
-      <span>Value Score</span> = 0.6 &times; Plat/1k Endo rank + 0.4 &times; min(Volume/48, 1) &times; 100
+      <span>Value Score</span> = (0.9 &times; Plat/1k Endo rank + 0.1 &times; min(Volume/48, 1)) &times; min(Volume/10, 1) &times; 100 &nbsp;<em style="color:#667788">[low-volume penalty kicks in below 10]</em>
       <br>
-      <span>Endo to R10:</span> Primed/Archon 40,920 &nbsp;|&nbsp; Galv/Gold 30,690 &nbsp;|&nbsp; Silver 20,460 &nbsp;|&nbsp; Bronze 10,230
+      <span>Endo to R10:</span> Archon/Primed 40,920 &nbsp;|&nbsp; Galv/Rare 30,690 &nbsp;|&nbsp; Uncommon 20,460 &nbsp;|&nbsp; Common 10,230
       <br>
-      <span>Profit Color:</span> &ge;80 green, &ge;60 yellow, &lt;60 red &nbsp;&nbsp;|&nbsp;&nbsp;
+      <span>Credit Tax:</span> Archon and Primed mods cost 1,000,000 credits each to obtain &mdash; off by default to keep them out of opportunity scoring
+      <br>
+      <span>Plat/1k Endo Color:</span> &ge;2.5 green, &ge;2 yellow, &lt;2 red &nbsp;&nbsp;|&nbsp;&nbsp;
       <span>Value Color:</span> &ge;75 green, &ge;50 yellow, &lt;50 red
     </div>
   </div>
@@ -330,23 +376,12 @@
     <div class="filter-sep"></div>
     <div class="filter-group type-filters">
       <label>Type</label>
-      <label class="type-chip archon"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Archon</span></label>
+      <label class="type-chip common"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Common</span></label>
+      <label class="type-chip uncommon"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Uncommon</span></label>
+      <label class="type-chip rare"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Rare</span></label>
       <label class="type-chip galvanized"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Galvanized</span></label>
-      <label class="type-chip primed"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Primed</span></label>
-      <label class="type-chip gold"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Gold</span></label>
-      <label class="type-chip silver"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Silver</span></label>
-      <label class="type-chip bronze"><input type="checkbox" checked onchange="applyFlipFilters()"><span class="chip">Bronze</span></label>
-    </div>
-    <div class="filter-sep"></div>
-    <div class="filter-group"><label>Min Profit</label><input type="number" id="flipMinProfit" placeholder="0" oninput="applyFlipFilters()"></div>
-    <div class="filter-group"><label>Min Value Score</label><input type="number" id="flipMinOpp" placeholder="0" oninput="applyFlipFilters()"></div>
-    <div class="filter-group"><label>Min Sell Price</label><input type="number" id="flipMinSell" placeholder="0" oninput="applyFlipFilters()"></div>
-    <div class="filter-group"><label>Min Volume</label><input type="number" id="flipMinVol" placeholder="0" oninput="applyFlipFilters()"></div>
-    <div class="filter-sep"></div>
-    <div class="filter-group">
-      <label>Endo/Plat</label>
-      <input type="number" id="flipEndoPerPlat" placeholder="e.g. 400" step="1" style="width:80px" oninput="recalcSimProfits()">
-      <span style="font-size:10px;color:#556">sim cost basis</span>
+      <label class="type-chip archon"><input type="checkbox" onchange="applyFlipFilters()"><span class="chip">Archon</span></label>
+      <label class="type-chip primed"><input type="checkbox" onchange="applyFlipFilters()"><span class="chip">Primed</span></label>
     </div>
     <div class="result-count" id="flipResultCount"></div>
   </div>
@@ -357,15 +392,14 @@
         <th data-col="name">Mod Name</th>
         <th data-col="type">Type</th>
         <th data-col="buyPrice" class="num">Buy (R0)</th>
-        <th data-col="sellPrice" class="num">Sell (R10)</th>
-        <th data-col="flipProfit" class="num">Flip Profit</th>
-        <th data-col="endoCost" class="num">Endo</th>
-        <th data-col="platPerEndo" class="num">Plat/1k Endo</th>
-        <th data-col="valueScore" class="num">Value Score</th>
-        <th data-col="maxVol" class="num">R10 Volume</th>
+        <th data-col="sellPrice" class="num"><span class="th-label">Sell (R10)</span><input type="number" class="col-filter" id="flipMinSell" placeholder="min" oninput="applyFlipFilters()"></th>
+        <th data-col="flipProfit" class="num"><span class="th-label">Flip Profit</span><input type="number" class="col-filter" id="flipMinProfit" placeholder="min" oninput="applyFlipFilters()"></th>
+        <th data-col="platPerEndo" class="num"><span class="th-label">Plat/1k Endo</span><input type="number" class="col-filter" id="flipMinPlatEndo" placeholder="min" step="0.1" oninput="applyFlipFilters()"></th>
+        <th data-col="valueScore" class="num"><span class="th-label">Value Score</span><input type="number" class="col-filter" id="flipMinOpp" placeholder="min" oninput="applyFlipFilters()"></th>
+        <th data-col="maxVol" class="num"><span class="th-label">R10 Volume</span><input type="number" class="col-filter" id="flipMinVol" placeholder="min" oninput="applyFlipFilters()"></th>
         <th data-col="link" class="no-sort">Link</th>
-        <th class="no-sort num">Sim R0</th>
-        <th class="no-sort num">Sim Profit</th>
+        <th class="no-sort num">Sim R10</th>
+        <th class="no-sort num">Sim Plat/1k Endo</th>
       </tr></thead>
       <tbody id="flipBody"></tbody>
     </table>
@@ -382,13 +416,9 @@
     <div class="formula-text">
       <span>Endo/Plat</span> = Endo Return &divide; R10 Price &nbsp;&nbsp;|&nbsp;&nbsp;
       <span>Price:</span> 48hr SMA if available, otherwise weighted avg
+      <br>
+      <span>R10 Dissolve Returns:</span> Archon/Primed 30,710 &nbsp;|&nbsp; Galv/Rare 23,033 &nbsp;|&nbsp; Uncommon 15,355 &nbsp;|&nbsp; Common 7,678
     </div>
-  </div>
-  <div class="endo-info">
-    <div class="endo-tier"><span class="tier-name">Primed / Archon:</span> <span class="tier-val">30,710</span> endo</div>
-    <div class="endo-tier"><span class="tier-name">Galvanized / Gold:</span> <span class="tier-val">23,033</span> endo</div>
-    <div class="endo-tier"><span class="tier-name">Silver:</span> <span class="tier-val">15,355</span> endo</div>
-    <div class="endo-tier"><span class="tier-name">Bronze:</span> <span class="tier-val">7,678</span> endo</div>
   </div>
   <div class="filters" id="endoFilters">
     <div class="filter-group">
@@ -398,14 +428,11 @@
     <div class="filter-sep"></div>
     <div class="filter-group type-filters">
       <label>Type</label>
-      <label class="type-chip primed-archon"><input type="checkbox" checked onchange="applyEndoFilters()"><span class="chip">Primed/Archon</span></label>
-      <label class="type-chip galv-gold"><input type="checkbox" checked onchange="applyEndoFilters()"><span class="chip">Galv/Gold</span></label>
-      <label class="type-chip silver"><input type="checkbox" checked onchange="applyEndoFilters()"><span class="chip">Silver</span></label>
-      <label class="type-chip bronze"><input type="checkbox" checked onchange="applyEndoFilters()"><span class="chip">Bronze</span></label>
+      <label class="type-chip common"><input type="checkbox" checked onchange="applyEndoFilters()"><span class="chip">Common</span></label>
+      <label class="type-chip uncommon"><input type="checkbox" checked onchange="applyEndoFilters()"><span class="chip">Uncommon</span></label>
+      <label class="type-chip galv-rare"><input type="checkbox" checked onchange="applyEndoFilters()"><span class="chip">Galv/Rare</span></label>
+      <label class="type-chip archon-primed"><input type="checkbox" onchange="applyEndoFilters()"><span class="chip">Archon/Primed</span></label>
     </div>
-    <div class="filter-sep"></div>
-    <div class="filter-group"><label>Min Endo/Plat</label><input type="number" id="endoMinRatio" placeholder="0" oninput="applyEndoFilters()"></div>
-    <div class="filter-group"><label>Min Volume</label><input type="number" id="endoMinVol" placeholder="0" oninput="applyEndoFilters()"></div>
     <div class="result-count" id="endoResultCount"></div>
   </div>
   <div class="table-wrapper">
@@ -416,9 +443,8 @@
         <th data-col="endoTier">Tier</th>
         <th data-col="endoReturn" class="num">Endo Return</th>
         <th data-col="r10Price" class="num">R10 Price</th>
-        <th data-col="endoPerPlat" class="num">Endo/Plat</th>
-        <th data-col="maxVol" class="num">R10 Volume</th>
-        <th data-col="priceSource">Source</th>
+        <th data-col="endoPerPlat" class="num"><span class="th-label">Endo/Plat</span><input type="number" class="col-filter" id="endoMinRatio" placeholder="min" oninput="applyEndoFilters()"></th>
+        <th data-col="maxVol" class="num"><span class="th-label">R10 Volume</span><input type="number" class="col-filter" id="endoMinVol" placeholder="min" oninput="applyEndoFilters()"></th>
         <th data-col="link" class="no-sort">Link</th>
         <th class="no-sort num">Sim Price</th>
         <th class="no-sort num">Sim E/P</th>
@@ -436,11 +462,17 @@
   <div class="tab-header">
     <h2>Arcane Pack Value Calculator</h2>
     <div class="formula-text">
-      <span>Arcane Value</span> = Max Rank Price &divide; (21 or 10) &nbsp;&nbsp;|&nbsp;&nbsp;
+      <span>Per Unit</span> = Max Rank Price &divide; (21 or 10 arcanes to max) &nbsp;&nbsp;|&nbsp;&nbsp;
       <span>Recycle</span> = Dissolve cheap arcanes &rarr; buy more packs &rarr; repeat
       <br>
       <span>Total EV</span> = Direct Plat &divide; (1 &minus; Vosfor Recycled &divide; 200) &nbsp;&nbsp;|&nbsp;&nbsp;
       <span>ROI</span> = (EV &minus; Pack Cost) &divide; Pack Cost &times; 100
+      <br>
+      <span>EV Color:</span> &ge;5p green, &ge;3p yellow, &lt;3p red &nbsp;&nbsp;|&nbsp;&nbsp;
+      <span>ROI Color:</span> &ge;50% green, &ge;0% yellow, &lt;0% red &nbsp;&nbsp;|&nbsp;&nbsp;
+      <span>Arcane Volume Color:</span> &ge;48 green, &ge;10 yellow, &lt;10 red
+      <br>
+      <span>No-Volume Arcanes:</span> arcanes with 0 trades in the last 48hr are auto-dissolved (untradeable) and contribute their base vosfor to the recycle pool
     </div>
   </div>
   <div class="filters" id="packsFilters" style="flex-wrap:wrap">
@@ -476,6 +508,8 @@
     <div class="formula-text">
       <span>Vosfor/Plat</span> = Vosfor Return &divide; Price &nbsp;&nbsp;|&nbsp;&nbsp;
       <span>Max Rank Vosfor</span> = Base Vosfor &times; 21 (R5) or &times; 10 (R3)
+      <br>
+      <em style="color:#667788">All listed arcanes and their data refer to the max rank version of the arcane (R5 or R3). Buying maxed always beats buying unranked on vosfor/plat efficiency.</em>
     </div>
   </div>
   <div class="filters" id="vosforFilters">
@@ -486,15 +520,12 @@
     <div class="filter-sep"></div>
     <div class="filter-group type-filters">
       <label>Rarity</label>
-      <label class="type-chip legendary"><input type="checkbox" checked onchange="applyVosforFilters()"><span class="chip">Legendary</span></label>
-      <label class="type-chip rare-arc"><input type="checkbox" checked onchange="applyVosforFilters()"><span class="chip">Rare</span></label>
-      <label class="type-chip uncommon-arc"><input type="checkbox" checked onchange="applyVosforFilters()"><span class="chip">Uncommon</span></label>
       <label class="type-chip common-arc"><input type="checkbox" checked onchange="applyVosforFilters()"><span class="chip">Common</span></label>
+      <label class="type-chip uncommon-arc"><input type="checkbox" checked onchange="applyVosforFilters()"><span class="chip">Uncommon</span></label>
+      <label class="type-chip rare-arc"><input type="checkbox" checked onchange="applyVosforFilters()"><span class="chip">Rare</span></label>
       <label class="type-chip tektolyst"><input type="checkbox" checked onchange="applyVosforFilters()"><span class="chip">Tektolyst</span></label>
+      <label class="type-chip legendary"><input type="checkbox" checked onchange="applyVosforFilters()"><span class="chip">Legendary</span></label>
     </div>
-    <div class="filter-sep"></div>
-    <div class="filter-group"><label>Min Vosfor/Plat</label><input type="number" id="vosforMinRatio" placeholder="0" oninput="applyVosforFilters()"></div>
-    <div class="filter-group"><label>Min Volume</label><input type="number" id="vosforMinVol" placeholder="0" oninput="applyVosforFilters()"></div>
     <div class="result-count" id="vosforResultCount"></div>
   </div>
   <div class="table-wrapper">
@@ -503,12 +534,10 @@
         <th data-col="rank">#</th>
         <th data-col="name">Arcane Name</th>
         <th data-col="rarity">Rarity</th>
-        <th data-col="rankLabel">Rank</th>
-        <th data-col="vosforReturn" class="num">Vosfor</th>
+        <th data-col="vosforReturn" class="num"><span class="th-label">Vosfor</span><input type="number" class="col-filter" id="vosforMinVosfor" placeholder="min" oninput="applyVosforFilters()"></th>
         <th data-col="price" class="num">Price</th>
-        <th data-col="vosforPerPlat" class="num">Vosfor/Plat</th>
-        <th data-col="vol" class="num">Volume</th>
-        <th data-col="priceSource">Source</th>
+        <th data-col="vosforPerPlat" class="num"><span class="th-label">Vosfor/Plat</span><input type="number" class="col-filter" id="vosforMinRatio" placeholder="min" oninput="applyVosforFilters()"></th>
+        <th data-col="vol" class="num"><span class="th-label">Volume</span><input type="number" class="col-filter" id="vosforMinVol" placeholder="min" oninput="applyVosforFilters()"></th>
         <th data-col="link" class="no-sort">Link</th>
         <th class="no-sort num">Sim Price</th>
         <th class="no-sort num">Sim V/P</th>
@@ -530,10 +559,11 @@
 let flipMods = [];
 let endoMods = [];
 let vosforMods = [];
+let arcaneNames = {};
 let flipFiltered = [];
 let endoFiltered = [];
 let vosforFiltered = [];
-let flipSort = { col: 'oppScore', dir: 'desc' };
+let flipSort = { col: 'valueScore', dir: 'desc' };
 let endoSort = { col: 'endoPerPlat', dir: 'desc' };
 let vosforSort = { col: 'vosforPerPlat', dir: 'desc' };
 let isFetching = false;
@@ -541,18 +571,18 @@ let activeTab = 'flip';
 
 // Endo returned when dissolving an R10 mod
 const ENDO_VALUES = {
-  'Primed/Archon': 30710,
-  'Galv/Gold': 23033,
-  'Silver': 15355,
-  'Bronze': 7678
+  'Archon/Primed': 30710,
+  'Galv/Rare': 23033,
+  'Uncommon': 15355,
+  'Common': 7678
 };
 
 // Endo required to rank a mod from R0 to R10
 const ENDO_COSTS = {
-  'Primed/Archon': 40920,
-  'Galv/Gold': 30690,
-  'Silver': 20460,
-  'Bronze': 10230
+  'Archon/Primed': 40920,
+  'Galv/Rare': 30690,
+  'Uncommon': 20460,
+  'Common': 10230
 };
 
 // Vosfor values per arcane (R0, from spreadsheet)
@@ -564,7 +594,7 @@ const VOSFOR_MAP = {
   'arcane_eruption':21,'arcane_escapist':84,'arcane_expertise':24,'arcane_fury':28,'arcane_grace':98,
   'arcane_guardian':21,'arcane_healing':21,'arcane_hot_shot':84,'arcane_ice':14,'arcane_ice_storm':24,
   'arcane_impetus':24,'arcane_intention':18,'arcane_momentum':14,'arcane_nullifier':14,'arcane_phantasm':21,
-  'arcane_pistoleer':20,'arcane_power_ramp':24,'arcane_precision':28,'arcane_primary_charger':20,'arcane_pulse':28,
+  'arcane_persistence':24,'arcane_pistoleer':20,'arcane_power_ramp':24,'arcane_precision':28,'arcane_primary_charger':20,'arcane_pulse':28,
   'arcane_rage':28,'arcane_reaper':84,'arcane_resistance':21,'arcane_rise':22,'arcane_steadfast':24,
   'arcane_strike':21,'arcane_tanker':20,'arcane_tempo':14,'arcane_trickery':21,'arcane_truculence':24,
   'arcane_ultimatum':28,'arcane_universal_fallout':84,'arcane_velocity':21,'arcane_victory':21,'arcane_warmth':14,
@@ -578,22 +608,22 @@ const VOSFOR_MAP = {
   'eternal_eradicate':22,'eternal_logistics':22,'eternal_onslaught':22,
   'virtuos_forge':18,'virtuos_fury':18,'virtuos_ghost':24,'virtuos_null':12,'virtuos_shadow':24,
   'virtuos_spike':12,'virtuos_strike':18,'virtuos_surge':12,'virtuos_tempo':12,'virtuos_trojan':18,
-  'zid_an_asheir':24,'zid_an_haras':24,'zid_an_osbok':24,'zid_an_sek_eel':24,'zid_an_uskos':24,
+  'zid-an-asheir':24,'zid-an-haras':24,'zid-an-osbok':24,'zid-an-sek-eel':24,'zid-an-uskos':24,
   'fractalized_reset':22,'longbow_sharpshot':84,'primary_blight':24,'primary_bulwark':24,'primary_crux':24,
   'primary_deadhead':20,'primary_debilitate':24,'primary_dexterity':20,'primary_exhilarate':24,
   'primary_frostbite':22,'primary_merciless':20,'primary_obstruct':24,'primary_overcharge':24,
   'primary_plated_round':24,'shotgun_vendetta':24,
   'akimbo_slip_shot':24,'cascadia_accuracy':22,'cascadia_empowered':22,'cascadia_flare':22,
   'cascadia_overcharge':22,'conjunction_voltage':22,'secondary_deadhead':20,'secondary_dexterity':20,
-  'secondary_encumber':24,'secondary_enervate':24,'secondary_fortifer':24,'secondary_irradiate':24,
+  'secondary_encumber':24,'secondary_enervate':24,'secondary_fortifier':24,'secondary_irradiate':24,
   'secondary_kinship':24,'secondary_merciless':20,'secondary_outburst':24,'secondary_shiver':84,
   'secondary_surge':24,
-  'melee_afflections':24,'melee_animosity':24,'melee_careen':24,'melee_crescendo':84,'melee_doughty':24,
+  'melee_afflictions':24,'melee_animosity':24,'melee_careen':24,'melee_crescendo':84,'melee_doughty':24,
   'melee_duplicate':84,'melee_exposure':24,'melee_fortification':18,'melee_influence':24,
   'melee_retaliation':18,'melee_vortex':24,
   'pax_bolt':24,'pax_charge':24,'pax_seeker':24,'pax_soar':24,
   'residual_boils':24,'residual_malodor':24,'residual_shock':24,'residual_viremia':24,
-  'exodia_brave':24,'exodia_force':24,'exodia_hunt':24,'exodia_might':24,
+  'exodia_brave':24,'exodia_contagion':84,'exodia_epidemic':84,'exodia_force':24,'exodia_hunt':24,'exodia_might':24,
   'exodia_triumph':18,'exodia_valor':18
 };
 
@@ -601,8 +631,8 @@ const VOSFOR_MAP = {
 const ARCANE_RARITY_OVERRIDES = {
   'arcane_consequence': 'Common', 'arcane_nullifier': 'Common', 'arcane_tempo': 'Common',
   'arcane_warmth': 'Common', 'arcane_momentum': 'Common',
-  'zid_an_sek_eel': 'Tektolyst', 'zid_an_asheir': 'Tektolyst', 'zid_an_uskos': 'Tektolyst',
-  'zid_an_haras': 'Tektolyst', 'zid_an_osbok': 'Tektolyst'
+  'zid-an-sek-eel': 'Tektolyst', 'zid-an-asheir': 'Tektolyst', 'zid-an-uskos': 'Tektolyst',
+  'zid-an-haras': 'Tektolyst', 'zid-an-osbok': 'Tektolyst'
 };
 
 // Filter out Peculiar mods (not arcanes)
@@ -613,7 +643,7 @@ const ARCANE_COLLECTIONS = {
   'Cavia': {
     arcanes: {
       uncommon: ['melee_fortification','melee_retaliation'],
-      rare: ['arcane_battery','arcane_ice_storm','secondary_fortifer','secondary_surge','melee_afflections','melee_animosity','melee_exposure','melee_influence','melee_vortex'],
+      rare: ['arcane_battery','arcane_ice_storm','secondary_fortifier','secondary_surge','melee_afflictions','melee_animosity','melee_exposure','melee_influence','melee_vortex'],
       legendary: ['melee_crescendo','melee_duplicate']
     },
     drops: { uncommon: 0.45, rare: 0.50, legendary: 0.05 }
@@ -635,13 +665,13 @@ const ARCANE_COLLECTIONS = {
     },
     drops: { common: 0.40, uncommon: 0.35, rare: 0.20, legendary: 0.05 }
   },
-  'Holdfast': {
+  'Holdfasts': {
     arcanes: {
       rare: ['arcane_blessing','arcane_rise','molt_augmented','molt_efficiency','molt_reconstruct','molt_vigor','emergence_dissipate','emergence_renewed','emergence_savior','eternal_eradicate','eternal_logistics','eternal_onslaught','fractalized_reset','primary_frostbite','cascadia_accuracy','cascadia_empowered','cascadia_flare','cascadia_overcharge','conjunction_voltage']
     },
     drops: { rare: 1.0 }
   },
-  'Hollvania': {
+  'Höllvania': {
     arcanes: {
       rare: ['arcane_bellicose','arcane_camisado','arcane_crepuscular','arcane_impetus','arcane_truculence','primary_crux','secondary_enervate','melee_doughty'],
       legendary: ['arcane_escapist','arcane_hot_shot','arcane_universal_fallout']
@@ -700,6 +730,14 @@ function switchTab(tab) {
   document.getElementById(navMap[tab]).classList.add('active');
 }
 
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const collapsed = sidebar.classList.toggle('collapsed');
+  try { localStorage.setItem('wf_sidebar_collapsed', collapsed ? '1' : '0'); } catch(e) {}
+  const btn = document.getElementById('sidebarToggle');
+  if (btn) btn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+}
+
 // ═══════════════════════════════════════════
 // CLASSIFICATION
 // ═══════════════════════════════════════════
@@ -708,19 +746,19 @@ function classifyFlipType(name, tags) {
   if (n.startsWith('archon ')) return 'Archon';
   if (n.startsWith('galvanized ')) return 'Galvanized';
   if (n.startsWith('primed ')) return 'Primed';
-  if (tags.includes('rare')) return 'Gold';
-  if (tags.includes('uncommon')) return 'Silver';
-  if (tags.includes('common')) return 'Bronze';
-  return 'Gold'; // fallback
+  if (tags.includes('rare')) return 'Rare';
+  if (tags.includes('uncommon')) return 'Uncommon';
+  if (tags.includes('common')) return 'Common';
+  return 'Rare'; // fallback
 }
 
 function classifyEndoTier(name, tags) {
   const n = name.toLowerCase();
-  if (n.startsWith('primed ') || n.startsWith('archon ') || tags.includes('legendary') || tags.includes('archon')) return 'Primed/Archon';
-  if (n.startsWith('galvanized ') || tags.includes('rare')) return 'Galv/Gold';
-  if (tags.includes('uncommon')) return 'Silver';
-  if (tags.includes('common')) return 'Bronze';
-  return 'Galv/Gold'; // fallback for unknown rarity
+  if (n.startsWith('primed ') || n.startsWith('archon ') || tags.includes('legendary') || tags.includes('archon')) return 'Archon/Primed';
+  if (n.startsWith('galvanized ') || tags.includes('rare')) return 'Galv/Rare';
+  if (tags.includes('uncommon')) return 'Uncommon';
+  if (tags.includes('common')) return 'Common';
+  return 'Galv/Rare'; // fallback for unknown rarity
 }
 
 // ═══════════════════════════════════════════
@@ -743,7 +781,8 @@ async function startFetch() {
   isFetching = true;
   const btn = document.getElementById('fetchBtn');
   btn.disabled = true;
-  btn.textContent = 'Fetching...';
+  const lbl = btn.querySelector('.fetch-label');
+  if (lbl) lbl.textContent = ' Fetching...';
   showProgress(true);
   updateProgress(0, 'Fetching item list...');
 
@@ -884,6 +923,10 @@ async function startFetch() {
     }
     await fetchArcaneStats();
 
+    // Populate name lookup from all fetched arcanes (including those without trade data)
+    arcaneNames = {};
+    for (const a of arcaneResults) arcaneNames[a.slug] = a.name;
+
     // ── Build flip mods and endo mods ──
     const newFlipMods = [];
     const newEndoMods = [];
@@ -911,7 +954,7 @@ async function startFetch() {
           name: m.name, slug: m.slug,
           endoTier, endoReturn,
           r10Price: r10.sma, priceSource: r10.hadSMA ? 'SMA' : 'Avg',
-          endoPerPlat: Math.round((endoReturn / r10.sma) * 10) / 10,
+          endoPerPlat: Math.round(endoReturn / r10.sma),
           maxVol: r10.vol
         });
       }
@@ -964,14 +1007,14 @@ async function startFetch() {
 
     // Cache
     const now = new Date();
-    const cacheData = { flipMods, endoMods, vosforMods, fetchedAt: now.toISOString() };
+    const cacheData = { flipMods, endoMods, vosforMods, arcaneNames, fetchedAt: now.toISOString() };
     try { localStorage.setItem('wf_mod_cache_v3', JSON.stringify(cacheData)); } catch(e) {}
 
     updateStatus(now);
     updateProgress(100, `Done! ${flipMods.length} flip, ${endoMods.length} endo, ${vosforMods.length} vosfor (${errors} errors)`);
     setTimeout(() => showProgress(false), 2000);
 
-    flipSort = { col: 'oppScore', dir: 'desc' };
+    flipSort = { col: 'valueScore', dir: 'desc' };
     endoSort = { col: 'endoPerPlat', dir: 'desc' };
     vosforSort = { col: 'vosforPerPlat', dir: 'desc' };
     applyFlipFilters();
@@ -989,7 +1032,8 @@ async function startFetch() {
 
   isFetching = false;
   btn.disabled = false;
-  btn.textContent = 'Fetch Data';
+  const lbl2 = btn.querySelector('.fetch-label');
+  if (lbl2) lbl2.textContent = ' Fetch Data';
 }
 
 // ═══════════════════════════════════════════
@@ -1025,12 +1069,24 @@ function updateSortHeaders(tab) {
   });
 }
 
+// Custom orderings for non-alphabetical string columns (mirror filter chip order on each tab)
+const FLIP_TYPE_ORDER = { Common: 0, Uncommon: 1, Rare: 2, Galvanized: 3, Archon: 4, Primed: 5 };
+const ENDO_TIER_ORDER = { 'Common': 0, 'Uncommon': 1, 'Galv/Rare': 2, 'Archon/Primed': 3 };
+const VOSFOR_RARITY_ORDER = { 'Common': 0, 'Uncommon': 1, 'Rare': 2, 'Tektolyst': 3, 'Legendary': 4 };
+const CUSTOM_ORDERS = { type: FLIP_TYPE_ORDER, endoTier: ENDO_TIER_ORDER, rarity: VOSFOR_RARITY_ORDER };
+
 function sortData(data, sort) {
   if (sort.dir === 'none') return [...data];
   return [...data].sort((a, b) => {
     let va = a[sort.col], vb = b[sort.col];
     if (va == null) va = sort.dir === 'asc' ? Infinity : -Infinity;
     if (vb == null) vb = sort.dir === 'asc' ? Infinity : -Infinity;
+    // Custom-order columns (type/tier/rarity): use chip order instead of alphabetical
+    const orderMap = CUSTOM_ORDERS[sort.col];
+    if (orderMap && orderMap[va] !== undefined && orderMap[vb] !== undefined) {
+      const cmp = orderMap[va] - orderMap[vb];
+      return sort.dir === 'asc' ? cmp : -cmp;
+    }
     if (typeof va === 'string') {
       const cmp = va.localeCompare(vb);
       return sort.dir === 'asc' ? cmp : -cmp;
@@ -1042,7 +1098,8 @@ function sortData(data, sort) {
 // Attach sort handlers
 function attachSortHandlers(theadId, tab) {
   document.getElementById(theadId).querySelectorAll('th').forEach(th => {
-    th.addEventListener('click', () => {
+    th.addEventListener('click', (e) => {
+      if (e.target.tagName === 'INPUT') return; // ignore clicks on embedded col-filter inputs
       if (th.classList.contains('no-sort')) return;
       const sort = getSort(tab);
       const col = th.dataset.col;
@@ -1066,6 +1123,7 @@ function attachSortHandlers(theadId, tab) {
 function applyFlipFilters() {
   const name = document.getElementById('flipFilterName').value.toLowerCase();
   const minProfit = parseFloat(document.getElementById('flipMinProfit').value) || null;
+  const minPlatEndo = parseFloat(document.getElementById('flipMinPlatEndo').value) || null;
   const minOpp = parseFloat(document.getElementById('flipMinOpp').value) || null;
   const minSell = parseFloat(document.getElementById('flipMinSell').value) || null;
   const minVol = parseFloat(document.getElementById('flipMinVol').value) || null;
@@ -1074,8 +1132,8 @@ function applyFlipFilters() {
   document.querySelectorAll('#flipFilters .type-chip input').forEach(cb => {
     const cls = cb.closest('.type-chip').className;
     const type = cls.includes('archon') ? 'Archon' : cls.includes('galvanized') ? 'Galvanized' :
-                 cls.includes('primed') ? 'Primed' : cls.includes('gold') ? 'Gold' :
-                 cls.includes('silver') ? 'Silver' : 'Bronze';
+                 cls.includes('primed') ? 'Primed' : cls.includes('rare') ? 'Rare' :
+                 cls.includes('uncommon') ? 'Uncommon' : 'Common';
     typeChecks[type] = cb.checked;
   });
 
@@ -1083,6 +1141,7 @@ function applyFlipFilters() {
     if (name && !m.name.toLowerCase().includes(name)) return false;
     if (!typeChecks[m.type]) return false;
     if (minProfit != null && (m.flipProfit == null || m.flipProfit < minProfit)) return false;
+    if (minPlatEndo != null && (m.platPerEndo == null || (m.platPerEndo * 1000) < minPlatEndo)) return false;
     if (minOpp != null && (m.valueScore == null || m.valueScore < minOpp)) return false;
     if (minSell != null && (m.sellPrice == null || m.sellPrice < minSell)) return false;
     if (minVol != null && m.maxVol < minVol) return false;
@@ -1106,7 +1165,9 @@ function computeValueScores(mods) {
   // Volume as raw 0–1 score, capped at 48 (1 trade/hr avg over 48hrs)
   const volScores = mods.map(m => Math.min((m.maxVol || 0) / 48, 1));
   for (let i = 0; i < n; i++) {
-    mods[i].valueScore = Math.round((endoRanks[i] * 0.6 + volScores[i] * 0.4) * 100 * 10) / 10;
+    // Liquidity penalty: scale score down linearly when vol < 10 (illiquid mods can't be traded reliably)
+    const lowVolPenalty = Math.min((mods[i].maxVol || 0) / 10, 1);
+    mods[i].valueScore = Math.round((endoRanks[i] * 0.9 + volScores[i] * 0.1) * lowVolPenalty * 100 * 10) / 10;
   }
 }
 
@@ -1124,50 +1185,43 @@ function renderFlipTable() {
   const rows = [];
   flipFiltered.forEach((m, i) => {
     const typeCls = 'type-' + m.type.toLowerCase();
-    const profitCls = m.flipProfit != null ? (m.flipProfit >= 80 ? 'profit-high' : m.flipProfit >= 60 ? 'profit-mid' : 'profit-low') : '';
-    const valCls = m.valueScore >= 75 ? 'opp-high' : m.valueScore >= 50 ? 'opp-mid' : 'opp-low';
+    const platEndoVal = Math.round((m.platPerEndo || 0) * 1000 * 100) / 100;
+    const platEndoCls = platEndoVal >= 2.5 ? 'profit-high' : platEndoVal >= 2 ? 'profit-mid' : 'profit-low';
+    const vsRounded = Math.round((m.valueScore || 0) * 10) / 10;
+    const valCls = vsRounded >= 75 ? 'opp-high' : vsRounded >= 50 ? 'opp-mid' : 'opp-low';
     rows.push(`<tr>
       <td class="num rank-col">${i+1}</td>
       <td>${esc(m.name)}</td>
       <td><span class="type-badge ${typeCls}">${m.type}</span></td>
       <td class="num">${fmt(m.buyPrice)}</td>
       <td class="num">${fmt(m.sellPrice)}</td>
-      <td class="num ${profitCls}">${fmt(m.flipProfit)}</td>
-      <td class="num">${m.endoCost.toLocaleString()}</td>
-      <td class="num">${(m.platPerEndo * 1000).toFixed(2)}</td>
+      <td class="num">${fmt(m.flipProfit)}</td>
+      <td class="num ${platEndoCls}">${platEndoVal.toFixed(2)}</td>
       <td class="num ${valCls}">${fmt(m.valueScore)}</td>
       <td class="num">${m.maxVol}</td>
       <td><a class="mod-link" href="https://warframe.market/items/${m.slug}" target="_blank">View</a></td>
-      <td class="num"><input type="number" class="sim-price-input sim-r0-input" data-sell="${m.sellPrice}" data-endo="${m.endoCost}" step="0.1" placeholder="—" style="width:60px;background:#131a27;color:#e0e0e0;border:1px solid #2a3a4a;border-radius:4px;padding:3px 5px;font-size:12px;text-align:right" oninput="updateSimProfit(this)"></td>
-      <td class="num sim-profit-cell" style="color:#556">—</td>
+      <td class="num"><input type="number" class="sim-price-input sim-r10-input" data-buy="${m.buyPrice}" data-endo="${m.endoCost}" step="0.1" placeholder="—" style="width:60px;background:#131a27;color:#e0e0e0;border:1px solid #2a3a4a;border-radius:4px;padding:3px 5px;font-size:12px;text-align:right" oninput="updateSimPlatEndo(this)"></td>
+      <td class="num sim-platendo-cell" style="color:#556">—</td>
     </tr>`);
   });
   tbody.innerHTML = rows.join('');
 }
 
-function updateSimProfit(input) {
-  const cell = input.closest('tr').querySelector('.sim-profit-cell');
-  const sellPrice = parseFloat(input.dataset.sell) || 0;
+function updateSimPlatEndo(input) {
+  const cell = input.closest('tr').querySelector('.sim-platendo-cell');
+  const buyPrice = parseFloat(input.dataset.buy) || 0;
   const endoCost = parseFloat(input.dataset.endo) || 0;
-  const r0Price = parseFloat(input.value);
-  const endoPerPlat = parseFloat(document.getElementById('flipEndoPerPlat')?.value) || 0;
+  const r10Price = parseFloat(input.value);
 
-  if (!r0Price || r0Price <= 0 || sellPrice <= 0) {
+  if (!r10Price || r10Price <= 0 || endoCost <= 0) {
     cell.textContent = '—';
     cell.style.color = '#556';
     return;
   }
 
-  const endoCostPlat = endoPerPlat > 0 ? endoCost / endoPerPlat : 0;
-  const profit = sellPrice - r0Price - endoCostPlat;
-  cell.textContent = profit.toFixed(1) + 'p';
-  cell.style.color = profit >= 80 ? '#4ade80' : profit >= 30 ? '#fbbf24' : '#f87171';
-}
-
-function recalcSimProfits() {
-  document.querySelectorAll('.sim-r0-input').forEach(input => {
-    if (input.value) updateSimProfit(input);
-  });
+  const platPer1kEndo = Math.round(((r10Price - buyPrice) / endoCost) * 1000 * 100) / 100;
+  cell.textContent = platPer1kEndo.toFixed(2);
+  cell.style.color = platPer1kEndo >= 2.5 ? '#4ade80' : platPer1kEndo >= 2 ? '#fbbf24' : '#f87171';
 }
 
 // ═══════════════════════════════════════════
@@ -1181,9 +1235,9 @@ function applyEndoFilters() {
   const tierChecks = {};
   document.querySelectorAll('#endoFilters .type-chip input').forEach(cb => {
     const cls = cb.closest('.type-chip').className;
-    const tier = cls.includes('primed-archon') ? 'Primed/Archon' :
-                 cls.includes('galv-gold') ? 'Galv/Gold' :
-                 cls.includes('silver') ? 'Silver' : 'Bronze';
+    const tier = cls.includes('archon-primed') ? 'Archon/Primed' :
+                 cls.includes('galv-rare') ? 'Galv/Rare' :
+                 cls.includes('uncommon') ? 'Uncommon' : 'Common';
     tierChecks[tier] = cb.checked;
   });
 
@@ -1212,9 +1266,9 @@ function renderEndoTable() {
 
   const rows = [];
   endoFiltered.forEach((m, i) => {
-    const tierCls = m.endoTier === 'Primed/Archon' ? 'type-primed' :
-                    m.endoTier === 'Galv/Gold' ? 'type-gold' :
-                    m.endoTier === 'Silver' ? 'type-silver' : 'type-bronze';
+    const tierCls = m.endoTier === 'Archon/Primed' ? 'type-primed' :
+                    m.endoTier === 'Galv/Rare' ? 'type-rare' :
+                    m.endoTier === 'Uncommon' ? 'type-uncommon' : 'type-common';
     // Color: higher endo/plat = better. Thresholds: >=500 green, >=300 yellow, <300 red
     const endoCls = m.endoPerPlat >= 500 ? 'endo-high' : m.endoPerPlat >= 300 ? 'endo-mid' : 'endo-low';
 
@@ -1226,7 +1280,6 @@ function renderEndoTable() {
       <td class="num">${fmt(m.r10Price)}</td>
       <td class="num ${endoCls}">${fmt(m.endoPerPlat)}</td>
       <td class="num">${m.maxVol}</td>
-      <td><span class="price-source">${m.priceSource}</span></td>
       <td><a class="mod-link" href="https://warframe.market/items/${m.slug}" target="_blank">View</a></td>
       <td class="num"><input type="number" class="sim-price-input" data-endo="${m.endoReturn}" step="0.1" placeholder="—" style="width:60px;background:#131a27;color:#e0e0e0;border:1px solid #2a3a4a;border-radius:4px;padding:3px 5px;font-size:12px;text-align:right" oninput="updateSimEP(this)"></td>
       <td class="num sim-ep-cell" style="color:#556">—</td>
@@ -1244,8 +1297,8 @@ function updateSimEP(input) {
     cell.style.color = '#556';
     return;
   }
-  const ep = endo / price;
-  cell.textContent = ep.toFixed(1);
+  const ep = Math.round(endo / price);
+  cell.textContent = fmt(ep);
   cell.style.color = ep >= 500 ? '#4ade80' : ep >= 300 ? '#fbbf24' : '#f87171';
 }
 
@@ -1254,6 +1307,7 @@ function updateSimEP(input) {
 // ═══════════════════════════════════════════
 function applyVosforFilters() {
   const name = document.getElementById('vosforFilterName').value.toLowerCase();
+  const minVosfor = parseFloat(document.getElementById('vosforMinVosfor').value) || null;
   const minRatio = parseFloat(document.getElementById('vosforMinRatio').value) || null;
   const minVol = parseFloat(document.getElementById('vosforMinVol').value) || null;
 
@@ -1268,8 +1322,10 @@ function applyVosforFilters() {
   });
 
   vosforFiltered = vosforMods.filter(m => {
+    if (m.rankLabel === 'R0') return false; // hide R0 — max rank always gives better vosfor/plat
     if (name && !m.name.toLowerCase().includes(name)) return false;
     if (!rarityChecks[m.rarity]) return false;
+    if (minVosfor != null && (m.vosforReturn == null || m.vosforReturn < minVosfor)) return false;
     if (minRatio != null && m.vosforPerPlat < minRatio) return false;
     if (minVol != null && m.vol < minVol) return false;
     return true;
@@ -1287,8 +1343,9 @@ function renderVosforTable() {
     document.getElementById('vosforResultCount').innerHTML = ''; return;
   }
   empty.style.display = 'none';
+  const totalDisplayable = vosforMods.filter(m => m.rankLabel !== 'R0').length;
   document.getElementById('vosforResultCount').innerHTML =
-    `Showing <span>${vosforFiltered.length}</span> of <span>${vosforMods.length}</span> entries`;
+    `Showing <span>${vosforFiltered.length}</span> of <span>${totalDisplayable}</span> entries`;
 
   const rows = [];
   vosforFiltered.forEach((m, i) => {
@@ -1296,18 +1353,17 @@ function renderVosforTable() {
                       m.rarity === 'Rare' ? 'type-rare-arc' :
                       m.rarity === 'Uncommon' ? 'type-uncommon-arc' :
                       m.rarity === 'Common' ? 'type-common-arc' : 'type-tektolyst';
-    const vCls = m.vosforPerPlat >= 15 ? 'vosfor-high' : m.vosforPerPlat >= 8 ? 'vosfor-mid' : 'vosfor-low';
+    const vppRounded = Math.round((m.vosforPerPlat || 0) * 10) / 10;
+    const vCls = vppRounded >= 15 ? 'vosfor-high' : vppRounded >= 8 ? 'vosfor-mid' : 'vosfor-low';
 
     rows.push(`<tr>
       <td class="num rank-col">${i+1}</td>
       <td>${esc(m.name)}</td>
       <td><span class="type-badge ${rarityCls}">${m.rarity}</span></td>
-      <td>${m.rankLabel}</td>
       <td class="num">${m.vosforReturn.toLocaleString()}</td>
       <td class="num">${fmt(m.price)}</td>
       <td class="num ${vCls}">${fmt(m.vosforPerPlat)}</td>
       <td class="num">${m.vol}</td>
-      <td><span class="price-source">${m.priceSource}</span></td>
       <td><a class="mod-link" href="https://warframe.market/items/${m.slug}" target="_blank">View</a></td>
       <td class="num"><input type="number" class="sim-price-input" data-vosfor="${m.vosforReturn}" step="0.1" placeholder="—" style="width:60px;background:#131a27;color:#e0e0e0;border:1px solid #2a3a4a;border-radius:4px;padding:3px 5px;font-size:12px;text-align:right" oninput="updateSimVP(this)"></td>
       <td class="num sim-vp-cell" style="color:#556">—</td>
@@ -1325,7 +1381,7 @@ function updateSimVP(input) {
     cell.style.color = '#556';
     return;
   }
-  const vp = vosfor / price;
+  const vp = Math.round((vosfor / price) * 10) / 10;
   cell.textContent = vp.toFixed(1);
   cell.style.color = vp >= 15 ? '#4ade80' : vp >= 8 ? '#fbbf24' : '#f87171';
 }
@@ -1387,7 +1443,7 @@ function renderPacks() {
 
   // Build slug->rarity and slug->name maps
   const rarityMap = {};
-  const nameMap = {};
+  const nameMap = { ...arcaneNames };
   for (const m of vosforMods) {
     if (!rarityMap[m.slug]) rarityMap[m.slug] = m.rarity.toLowerCase();
     if (!nameMap[m.slug]) nameMap[m.slug] = m.name;
@@ -1415,10 +1471,11 @@ function renderPacks() {
         const maxPrice = arcaneMaxPrice[slug];
         const baseVosfor = arcaneBaseVosfor[slug] || 0;
         const vol = arcaneMaxVol[slug] || 0;
-        if (unitPrice == null) continue;
+        const noPriceData = unitPrice == null;
         count++;
 
-        const dissolved = (threshold > 0 && maxPrice < threshold) || (minVol > 0 && vol < minVol);
+        // No trade data → can't sell, auto-dissolve for vosfor
+        const dissolved = noPriceData || (threshold > 0 && maxPrice < threshold) || (minVol > 0 && vol < minVol);
         if (dissolved) {
           totalVosfor += baseVosfor;
         } else {
@@ -1426,9 +1483,9 @@ function renderPacks() {
         }
 
         arcaneDetails.push({
-          slug, name: nameMap[slug] || slug.replace(/_/g, ' '),
+          slug, name: nameMap[slug] || slug.split(/[_-]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
           rarity, color: rarityColors[rarity],
-          unitPrice, maxPrice, baseVosfor, dissolved, vol
+          unitPrice, maxPrice, baseVosfor, dissolved, vol, noPriceData
         });
       }
 
@@ -1469,7 +1526,7 @@ function renderPacks() {
   const hasThreshold = threshold > 0;
 
   const cards = packResults.map(p => {
-    const evColor = p.totalEV >= 10 ? '#4ade80' : p.totalEV >= 5 ? '#fbbf24' : '#f87171';
+    const evColor = p.totalEV >= 5 ? '#4ade80' : p.totalEV >= 3 ? '#fbbf24' : '#f87171';
 
     // Build arcane detail rows grouped by rarity
     const tierSections = p.arcaneRows.map(tier => {
@@ -1481,9 +1538,9 @@ function renderPacks() {
         const platCell = a.dissolved
           ? `<span style="color:#667788;font-style:italic">dissolve</span>`
           : `<span style="color:#e0e0e0">${a.unitPrice.toFixed(1)}p</span>`;
-        const maxPriceCell = `<span style="color:#b0b8c0">${a.maxPrice != null ? a.maxPrice.toFixed(0) + 'p' : '—'}</span>`;
-        const volCell = `<span style="color:${a.vol >= 20 ? '#4ade80' : a.vol >= 5 ? '#fbbf24' : '#f87171'}">${a.vol}</span>`;
-        const vosforCell = `<span style="color:#8899aa">${a.baseVosfor}v</span>`;
+        const maxPriceCell = `<span style="color:#b0b8c0">${a.maxPrice != null ? a.maxPrice.toFixed(0) + 'p' : 'N/A'}</span>`;
+        const volCell = `<span style="color:${a.vol >= 48 ? '#4ade80' : a.vol >= 10 ? '#fbbf24' : '#f87171'}">${a.vol}</span>`;
+        const vosforCell = `<span style="color:#8899aa">${a.baseVosfor}</span>`;
         return `<div class="arcane-row${a.dissolved ? ' dissolved' : ''}">
           <span class="arcane-name" style="color:${a.color}">${esc(a.name)}</span>
           <span class="arcane-maxprice">${maxPriceCell}</span>
@@ -1504,7 +1561,7 @@ function renderPacks() {
         </div>`
       : '';
 
-    const roiColor = p.roi >= 200 ? '#4ade80' : p.roi >= 50 ? '#fbbf24' : '#f87171';
+    const roiColor = p.roi >= 50 ? '#4ade80' : p.roi >= 0 ? '#fbbf24' : '#f87171';
     const roiDisplay = packCostPlat > 0
       ? `<div>
           <div class="pack-ev" style="color:${roiColor};font-size:22px">${p.roi.toFixed(0)}%</div>
@@ -1525,7 +1582,16 @@ function renderPacks() {
       </div>
       ${evBreakdown}
       ${costNote}
-      <div class="pack-arcane-list" style="margin-top:10px">${tierSections}</div>
+      <div class="pack-arcane-list" style="margin-top:10px">
+        <div class="arcane-row arcane-header">
+          <span class="arcane-name">Arcane</span>
+          <span class="arcane-maxprice">Max Sell</span>
+          <span class="arcane-vol">Vol</span>
+          <span class="arcane-plat">Per Unit</span>
+          <span class="arcane-vosfor">Vosfor</span>
+        </div>
+        ${tierSections}
+      </div>
     </div>`;
   });
 
@@ -1565,6 +1631,15 @@ attachSortHandlers('vosforThead', 'vosfor');
 })();
 
 (function init() {
+  try {
+    if (localStorage.getItem('wf_sidebar_collapsed') === '1') {
+      const sidebar = document.getElementById('sidebar');
+      sidebar.classList.add('collapsed');
+      const btn = document.getElementById('sidebarToggle');
+      if (btn) btn.title = 'Expand sidebar';
+    }
+  } catch(e) {}
+
   let cacheAge = Infinity;
   try {
     const cached = localStorage.getItem('wf_mod_cache_v3');
@@ -1573,6 +1648,7 @@ attachSortHandlers('vosforThead', 'vosfor');
       flipMods = data.flipMods || [];
       endoMods = data.endoMods || [];
       vosforMods = data.vosforMods || [];
+      arcaneNames = data.arcaneNames || {};
       computeValueScores(flipMods);
       updateStatus(data.fetchedAt);
       applyFlipFilters();
