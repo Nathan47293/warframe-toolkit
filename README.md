@@ -130,6 +130,15 @@ Three files in the repo:
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for one-time setup (Cloudflare Worker + GitHub Pages, ~10 min, free tier on both).
 
+## Companion: Chrome Extension (Dynamic Price Automator + Ducanator 2.0)
+
+A separate Chrome extension lives in [`chrome-extension/`](chrome-extension/) for live trading. It ships two panels:
+
+- **Dynamic Price Automator** — injects on your warframe.market profile page (after a one-time claim-profile prompt), reads each of your R10 mod sell listings, finds the cheapest *ingame* competitor, and recommends a `−1p` undercut gated by a plat/1k endo floor.
+- **Ducanator 2.0** — injects on `warframe.market/tools/ducats`, scrapes the top-N rows from the Ducanator (despite the page using react-virtuoso virtualization), looks up the cheapest live ingame seller for each, and ranks the best real ducats/plat deals. Auto-clicks the page's Ducats/Plat column header to ensure descending sort before each scan. Persistent seller blocklist with one-click block from any result row, plus a `[/w]` link to copy a pre-formatted whisper for the seller.
+
+Loaded as an unpacked extension — see the folder's README for install steps. Lives in this repo for source-of-truth tracking but runs entirely on warframe.market once installed.
+
 ## Browser Requirements
 
 Modern enough to support CSS `:has()` — Chrome 105+, Firefox 121+, Safari 15.4+.

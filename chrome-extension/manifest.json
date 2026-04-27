@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Warframe Dynamic Price Automator",
+  "version": "0.11.0",
+  "description": "Reads your warframe.market mod listings, finds the cheapest ingame competitor for each, and recommends a -1p undercut gated by a configurable plat/1k endo floor.",
+  "host_permissions": [
+    "https://warframe.market/*",
+    "https://api.warframe.market/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://warframe.market/profile/*",
+        "https://warframe.market/tools/ducats*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
