@@ -605,6 +605,14 @@ async function setupAlarm() {
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== ALARM_NAME) return;
+  // Tab-presence gate: skip scheduled scans when no Ducanator tab is
+  // open. Closing the last Ducanator tab is a clean way to say "I'm
+  // done for now" without having to flip the master toggle. The alarm
+  // keeps firing (cheap to no-op vs re-arming on tab open/close); the
+  // next tick after a tab reopens will run normally. Manual Run Now
+  // from the panel always runs, since clicking it implies a tab.
+  const tabs = await findDucanatorTabs();
+  if (tabs.length === 0) return;
   await runScan({ via: 'alarm' });
 });
 

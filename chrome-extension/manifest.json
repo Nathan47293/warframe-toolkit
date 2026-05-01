@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Warframe Dynamic Price Automator",
-  "version": "0.32.0",
+  "version": "0.32.1",
   "description": "Reads your warframe.market mod listings, finds the cheapest ingame competitor for each, and recommends a -1p undercut gated by a configurable plat/1k endo floor.",
   "permissions": ["notifications", "storage", "alarms"],
   "host_permissions": [
