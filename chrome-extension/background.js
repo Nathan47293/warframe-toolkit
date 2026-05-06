@@ -360,8 +360,18 @@ async function runScan({ via }) {
     const ducatsNote = noteParts.length > 0 ? ` · ${noteParts.join(' · ')}` : '';
     sendStatus(`${items.length} cached rows${ducatsNote}. Fetching live listings...`);
 
+    // Per-listing emission: every qualifying (item, seller) combination
+    // becomes its own row. Sorted globally by sortBy desc (with optional
+    // secondary tiebreaker, then totalDucats as the final tier so a
+    // 13-qty listing beats a 3-qty one at the same rate). Top-M is sliced
+    // from the global sort so the highest-rate deals always surface
+    // regardless of which item they belong to.
     const enriched = [];
-    let droppedByEff = 0, droppedByMins = 0, missingPartsData = 0;
+    let droppedByEff = 0;        // items where every candidate had K=0
+    let droppedByMins = 0;       // items where K>0 sellers all failed min filters
+    let itemsWithListings = 0;   // items that contributed at least one row
+    let missingPartsData = 0;
+    let fetchErrors = 0;
 
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
@@ -376,9 +386,6 @@ async function runScan({ via }) {
       }
       try {
         const orders = await getItemOrders(it.slug);
-        // Evaluate every qualifying seller, drop the ones failing min filters,
-        // pick the one with the highest sort-metric score. (Same logic as
-        // content.js v0.31.0.)
         const candidates = orders
           .filter(o => o.type === 'sell')
           .filter(o => o.user?.status === 'ingame')
@@ -388,9 +395,7 @@ async function runScan({ via }) {
           .sort((a, b) => a.platinum - b.platinum);
 
         const ducatsPerUnit = it.ducats;
-        let chosen = null, chosenK = 0, chosenScore = -Infinity;
-        let chosenBreakdown = null, chosenDpp = 0;
-        let candidatesWithK = 0;
+        let candidatesWithK = 0, listingsForThisItem = 0;
         for (const c of candidates) {
           const K = findOptimalK(c.quantity || 0, partsPerUnit, s.minTradeEff, ducatsPerUnit, s.minDpt);
           if (K === 0) continue;
@@ -401,50 +406,48 @@ async function runScan({ via }) {
           if (dpp < effectiveDppFloor) continue;
           if (breakdown.dPerTrade < s.minDpt) continue;
           if (breakdown.totalDucats < s.minTotalD) continue;
-          const score = s.sortBy === 'dpt' ? breakdown.dPerTrade
-            : s.sortBy === 'total' ? breakdown.totalDucats : dpp;
-          if (score > chosenScore) {
-            chosen = c; chosenK = K; chosenScore = score;
-            chosenBreakdown = breakdown; chosenDpp = dpp;
-          }
-        }
-        if (!chosen) {
-          enriched.push({ ...it, ingamePrice: null, dpp: 0, sellerName: null });
-          if (candidates.length > 0 && candidatesWithK === 0) droppedByEff++;
-          else if (candidatesWithK > 0) droppedByMins++;
-        } else {
           enriched.push({
             ...it,
-            ingamePrice: chosen.platinum,
-            quantity: chosen.quantity,
-            boughtK: chosenK,
+            ingamePrice: c.platinum,
+            quantity: c.quantity,
+            boughtK: K,
             partsPerUnit,
             isSet,
-            dpp: chosenDpp,
-            dPerTrade: chosenBreakdown.dPerTrade,
-            totalD: chosenBreakdown.totalDucats,
-            totalTrades: chosenBreakdown.totalTrades,
-            breakdownStr: formatTradeBreakdown(chosenBreakdown),
-            sellerName: chosen.user.ingameName || chosen.user.slug || '',
-            sellerSlug: (chosen.user.slug || '').toLowerCase(),
+            dpp,
+            dPerTrade: breakdown.dPerTrade,
+            totalD: breakdown.totalDucats,
+            totalTrades: breakdown.totalTrades,
+            breakdownStr: formatTradeBreakdown(breakdown),
+            sellerName: c.user.ingameName || c.user.slug || '',
+            sellerSlug: (c.user.slug || '').toLowerCase(),
           });
+          listingsForThisItem++;
         }
+        if (listingsForThisItem > 0) itemsWithListings++;
+        else if (candidates.length > 0 && candidatesWithK === 0) droppedByEff++;
+        else if (candidatesWithK > 0) droppedByMins++;
       } catch (err) {
-        enriched.push({ ...it, ingamePrice: null, dpp: 0, error: String(err.message || err) });
+        fetchErrors++;
       }
       if (i < items.length - 1) await sleep(PACE_MS);
     }
 
-    const dealable = enriched.filter(e => e.ingamePrice != null);
     const keyFor = (k) => k === 'dpt' ? 'dPerTrade' : k === 'total' ? 'totalD' : k === 'dpp' ? 'dpp' : null;
     const sortKey = keyFor(s.sortBy) || 'dpp';
     const secondaryKey = keyFor(s.secondarySortBy);
-    dealable.sort((a, b) => {
+    enriched.sort((a, b) => {
       const primaryDiff = (b[sortKey] || 0) - (a[sortKey] || 0);
-      if (primaryDiff !== 0 || !secondaryKey) return primaryDiff;
-      return (b[secondaryKey] || 0) - (a[secondaryKey] || 0);
+      if (primaryDiff !== 0) return primaryDiff;
+      if (secondaryKey) {
+        const secondaryDiff = (b[secondaryKey] || 0) - (a[secondaryKey] || 0);
+        if (secondaryDiff !== 0) return secondaryDiff;
+      }
+      // Final tiebreaker: bigger total ducats (= more units bought) wins.
+      // Without this a 13-qty listing can lose to a 3-qty listing of the
+      // same item at the same rate, just because of API response order.
+      return (b.totalD || 0) - (a.totalD || 0);
     });
-    const topResults = dealable.slice(0, s.topM);
+    const topResults = enriched.slice(0, s.topM);
 
     // Pre-format the whisper text per row so content.js can drop straight
     // into a data-message attribute without needing the formatter.
@@ -467,10 +470,14 @@ async function runScan({ via }) {
       whisperText: formatWhisper(e),
     }));
 
-    const noIngame = items.length - dealable.length - missingPartsData - droppedByEff - droppedByMins;
+    // Per-arcane bucket counts for the status line, even though enriched
+    // is now per-listing. noIngame = items with no qualifying seller at
+    // all (including blocked/own listings filtered out).
+    const noIngame = items.length - itemsWithListings - missingPartsData
+                     - droppedByEff - droppedByMins - fetchErrors;
     const cutoffParts = [];
     if (noIngame > 0) cutoffParts.push(`${noIngame} no qualifying seller`);
-    if (droppedByEff > 0) cutoffParts.push(`${droppedByEff} dropped by ${s.minTradeEff}/${BH.TRADE_CAP} trade-eff`);
+    if (droppedByEff > 0) cutoffParts.push(`${droppedByEff} items dropped by ${s.minTradeEff}/${BH.TRADE_CAP} trade-eff`);
     if (missingPartsData > 0) cutoffParts.push(`${missingPartsData} sets missing parts data, refresh source cache`);
     if (droppedByMins > 0) {
       const minLabels = [];
@@ -479,11 +486,13 @@ async function runScan({ via }) {
       if (s.minDpt > 0) minLabels.push(`${s.minDpt} D/trade`);
       if (s.minTotalD > 0) minLabels.push(`${s.minTotalD} D total`);
       cutoffParts.push(minLabels.length > 0
-        ? `${droppedByMins} no seller met min ${minLabels.join(' / ')}`
-        : `${droppedByMins} dropped`);
+        ? `${droppedByMins} items had no seller meeting min ${minLabels.join(' / ')}`
+        : `${droppedByMins} items dropped`);
     }
+    if (fetchErrors > 0) cutoffParts.push(`${fetchErrors} fetch errors`);
     const cutoffStr = cutoffParts.length > 0 ? ` (${cutoffParts.join('; ')})` : '';
-    const statusText = `Scanned ${items.length} from ${scraped.length} cached. Top ${topResults.length} shown${cutoffStr}.`;
+    const totalListings = enriched.length;
+    const statusText = `Scanned ${items.length} from ${scraped.length} cached, ${totalListings} listing${totalListings === 1 ? '' : 's'} pass; top ${topResults.length} shown${cutoffStr}.`;
     const lastScanTs = Date.now();
     await chrome.storage.local.set({ [BH.LAST_SCAN]: String(lastScanTs) });
     broadcastToDucanatorTabs({ type: 'wfbh-scan-results', recs, statusText, lastScanTs });
