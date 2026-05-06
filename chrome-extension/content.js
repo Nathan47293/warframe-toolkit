@@ -2825,7 +2825,8 @@
       const namesMap = await getArcaneNamesMap();
 
       const enriched = [];
-      let droppedByMins = 0;
+      let droppedByMins = 0;        // arcanes whose every candidate failed filters
+      let arcanesWithListings = 0;  // arcanes that produced at least one row
       for (let i = 0; i < watchlist.length; i++) {
         const slug = watchlist[i];
         const name = namesMap[slug] || prettifySlug(slug);
@@ -2850,9 +2851,13 @@
             .filter(o => o.platinum > 0)
             .sort((a, b) => a.platinum - b.platinum);
 
-          let chosen = null, chosenK = 0, chosenScore = -Infinity;
-          let chosenBreakdown = null, chosenVpp = 0;
-          let candidatesWithK = 0;
+          // Per-listing emission: every qualifying seller becomes its own
+          // result row. (Unlike Ducanator's per-item best-seller pick:
+          // there we have 50-500 items and need to compress; here the
+          // user has a small watchlist and wants every passing deal
+          // visible.) Filtering rules same as before, just no
+          // "pick the best" reduction step.
+          let candidatesWithK = 0, listingsForThisArcane = 0;
           for (const c of candidates) {
             // Arcanes are P=1; effFloor=1 (any partial OK — minVpt does
             // the meaningful filtering). minRpt=minVpt enforces per-trade
@@ -2864,37 +2869,38 @@
             const vpp = vosforPerUnit / c.platinum;
             if (vpp < minVpp) continue;
             if (breakdown.rewardsPerTrade < minVpt) continue;
-            if (vpp > chosenScore) {
-              chosen = c; chosenK = K; chosenScore = vpp;
-              chosenBreakdown = breakdown; chosenVpp = vpp;
-            }
+            enriched.push({
+              slug, name, maxRank,
+              vosforPerUnit,
+              ingamePrice: c.platinum,
+              quantity: c.quantity,
+              boughtK: K,
+              vpp,
+              vpt: breakdown.rewardsPerTrade,
+              totalV: breakdown.totalRewards,
+              totalTrades: breakdown.totalTrades,
+              breakdownStr: formatTradeBreakdown(breakdown),
+              sellerName: c.user.ingameName || c.user.slug || '',
+              sellerSlug: (c.user.slug || '').toLowerCase(),
+            });
+            listingsForThisArcane++;
           }
-          if (!chosen) {
-            if (candidatesWithK > 0) droppedByMins++;
-            continue;
-          }
-          enriched.push({
-            slug, name, maxRank,
-            vosforPerUnit,
-            ingamePrice: chosen.platinum,
-            quantity: chosen.quantity,
-            boughtK: chosenK,
-            vpp: chosenVpp,
-            vpt: chosenBreakdown.rewardsPerTrade,
-            totalV: chosenBreakdown.totalRewards,
-            totalTrades: chosenBreakdown.totalTrades,
-            breakdownStr: formatTradeBreakdown(chosenBreakdown),
-            sellerName: chosen.user.ingameName || chosen.user.slug || '',
-            sellerSlug: (chosen.user.slug || '').toLowerCase(),
-          });
+          if (listingsForThisArcane > 0) arcanesWithListings++;
+          else if (candidatesWithK > 0) droppedByMins++;
         } catch (err) {
           // Per-arcane fetch failure: log + continue.
         }
         if (i < watchlist.length - 1) await sleep(PACE_MS);
       }
 
-      // Sort by vpp desc, slice to top-M.
-      enriched.sort((a, b) => b.vpp - a.vpp);
+      // Sort by vpp desc; tiebreak on total vosfor desc so a 7p × 13
+      // listing outranks a 7p × 3 from the same seller's neighborhood
+      // (same rate, but more units = bigger haul). Slice to top-M.
+      enriched.sort((a, b) => {
+        const d = b.vpp - a.vpp;
+        if (d !== 0) return d;
+        return b.totalV - a.totalV;
+      });
       const top = enriched.slice(0, topM);
       panel._wfaaWlLatestResults = top;
 
@@ -2922,19 +2928,23 @@
       });
 
       renderRecs(results, displayRecs);
-      const noQual = watchlist.length - enriched.length - droppedByMins;
+      // Counts are per-arcane (not per-listing) so the user sees how
+      // their watchlist split, regardless of how many listings each
+      // arcane contributed.
+      const noQual = watchlist.length - arcanesWithListings - droppedByMins;
       const cutoffParts = [];
-      if (noQual > 0) cutoffParts.push(`${noQual} no qualifying seller`);
+      if (noQual > 0) cutoffParts.push(`${noQual} arcanes with no qualifying seller`);
       if (droppedByMins > 0) {
         const minLabels = [];
         if (minVpp > 0) minLabels.push(`${minVpp} v/p`);
         if (minVpt > 0) minLabels.push(`${minVpt} v/trade`);
         cutoffParts.push(minLabels.length > 0
-          ? `${droppedByMins} no seller met min ${minLabels.join(' / ')}`
+          ? `${droppedByMins} arcanes had no seller meeting min ${minLabels.join(' / ')}`
           : `${droppedByMins} dropped`);
       }
       const cutoffStr = cutoffParts.length > 0 ? ` (${cutoffParts.join('; ')})` : '';
-      status.textContent = `Scanned ${watchlist.length} watched. Top ${top.length} shown${cutoffStr}.`;
+      const totalListings = enriched.length;
+      status.textContent = `Scanned ${watchlist.length} watched, ${totalListings} listing${totalListings === 1 ? '' : 's'} pass; top ${top.length} shown${cutoffStr}.`;
       localStorage.setItem(AAP.WL_LAST_SCAN, String(Date.now()));
 
       // Notification dispatch — fresh-deal dedup keyed by slug:rank:seller.
