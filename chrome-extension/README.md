@@ -1,9 +1,12 @@
 # Warframe Dynamic Price Automator (Chrome Extension)
 
-A Chrome extension that ships **two panels** for live trading on warframe.market, both injected by a single content script:
+A Chrome extension that ships **three panels** for live trading on warframe.market, all injected by a single content script:
 
-- **Dynamic Price Automator** — on *your own* profile page, reads each of your R10 mod sell listings, finds the cheapest *ingame* competitor, and recommends a `−1p` undercut gated by a configurable plat/1k endo floor so it never undercuts past your break-even. Arcanes, riven mods, non-R10 listings, and buy orders are skipped automatically.
-- **Ducanator 2.0** — on the Ducanator page (`/tools/ducats`), scrapes the top-N rows of the live ducat-deal table (despite the page using react-virtuoso virtualization), looks up the cheapest live ingame seller for each, and ranks the best real `ducats/plat` deals.
+- **Dynamic Price Automator** (profile page) — reads each of your R10 mod sell listings, finds the cheapest *ingame* competitor, and recommends a `−1p` undercut gated by a configurable plat/1k endo floor so it never undercuts past your break-even. Arcanes, riven mods, non-R10 listings, and buy orders are skipped automatically.
+- **Arcanes** panel (profile page) — two tabs:
+  - **Auto-Pricer**: same walk-up undercut as DPA but for max-rank arcane listings, with the floor sourced from the **48hr SMA** at the listing's rank ± a signed plat offset you set. Per-rank scoping; auto-applies via PATCH like DPA.
+  - **Watchlist**: vosfor/plat hunter for a curated shortlist of arcanes. Pulls live ingame sells, scores by `vosfor/plat` (max-rank vosfor multipliers built in: ×21 for R5, ×10 for R3), filters by min vosfor/plat AND min vosfor/trade (each in-game trade fits up to 6 max-rank arcanes), surfaces the best deal per arcane with whisper, [block], and [+rep] links.
+- **Ducanator 2.0** (`/tools/ducats`) — scrapes the top-N rows of the live ducat-deal table (despite the page using react-virtuoso virtualization), looks up the cheapest live ingame seller for each, and ranks the best real `ducats/plat` deals.
 
 ## Features
 
@@ -24,6 +27,35 @@ Both panels:
   - **Target #1 count** — you type how many of your mods you want at position 1 (cheapest); the floor is **derived dynamically every scan** from the live market data. The derivation: for each mod with a competitor, compute the "would-be #1 ratio" `(cheapest_competitor_plat − 1) / endo_cost × 1000`. Sort those descending, take the Nth (where N = target − unopposed-mods-already-at-#1). That value is the highest floor where exactly N mods land at #1. Edge cases: if you already have ≥N mods unopposed (no ingame competitor), the computed floor is `∞` (no undercut runs); if you set N higher than the total mods that *can* reach #1, it's `0` (everyone undercuts and the achievable count is whatever the market supports). The computed floor is shown back to you under the input as `Computed floor: 2.30 P/1k (target 5 #1: 2 unopposed + 3 cheapest-tier above floor)` so you know the actual margin in play.
 - **Auto-refresh on apply**: when prices change, the page reloads to show new prices. The skip-initial flag prevents a re-scan loop; interval timing is preserved across the reload via `LAST_SCAN_KEY`.
 - PATCH `/v2/order/{id}` with `{ visible, platinum, quantity, rank }`, ~500ms apart, with `X-CSRFToken`.
+
+### Arcanes panel (warframe.market/profile/<slug>)
+
+Lives on **your own** profile page next to DPA. One panel, two tabs at the top: **Auto-Pricer** and **Watchlist**. Each tab has its own master toggle, settings, and Run Now button. Tab + collapse + position state is persisted independently of DPA's panel.
+
+#### Auto-Pricer tab (sell side)
+
+The arcane equivalent of DPA, but the floor source is the per-rank 48hr SMA from `/v1/items/{slug}/statistics` instead of plat/1k endo.
+
+- Only manages **arcane** sell listings (`isArcaneSlug` → checks against the hardcoded `VOSFOR_MAP`). Non-arcane listings are silently skipped.
+- Only operates on listings whose `rank` matches the arcane's `max_rank` (R5 for most, R3 for the Tektolyst family). Lower-rank listings are reported as skipped (the panel only manages max-rank listings; the user said they only sell max-rank).
+- **Floor** = `48hr SMA + offset` plat (signed integer offset; default 0). Positive = more conservative (sell higher); negative = more aggressive (willing to undercut below SMA). Per-row detail shows e.g. `floor 215p (SMA 220p −5)` so you always see what's in play.
+- **Walk-up algorithm** identical to DPA's: try `cheapest_competitor − 1`, fall through to `2nd − 1`, `3rd − 1`, etc., picking the highest-tier slot still ≥ floor. If every slot is below floor, hold the listing.
+- **Auto-applies** via `PATCH /v2/order/{id}` like DPA, with the same page-reload-on-apply trick to refresh the displayed prices.
+- **Status gate**: only auto-runs when status is `ingame` (same `detectMyStatus` helper DPA uses). Manual Run Now ignores the gate.
+- SMA fetched fresh every scan (no caching; matches the website's behaviour). One stats call per arcane listing per scan, paced 350ms apart.
+
+#### Watchlist tab (buy side)
+
+The arcane equivalent of Ducanator, but per-arcane and on a curated shortlist instead of scraping the whole ducat table.
+
+- **Watchlist editor**: type-to-search input that autocompletes against the hardcoded `VOSFOR_MAP` keys (joined with display names from `/v2/items` for readability). Click a suggestion to add. Watched arcanes shown as removable chips below.
+- **Max-rank only**: scans live ingame sells filtered to the arcane's `max_rank` (R5 or R3). Each unit dissolves for `base_vosfor × max_rank_multiplier` (×21 for R5, ×10 for R3 — these multipliers come from the in-game vosfor system; max-rank always wins on vosfor/plat efficiency).
+- **Trade math** (same shape as Ducanator's items mode with `P=1`): for each candidate seller, find the largest K units (≤ qty) such that the partial trade clears your **Min vosfor/trade** floor. K is decremented to drop the partial when it falls below floor. 6 max-rank arcanes fit in one trade slot.
+- **Filters**: **Min vosfor/plat** (efficiency), **Min vosfor/trade** (per-trade payout). Both displayed per result row. **Top-M results** caps the output. (Max-plat filter is on the roadmap if needed.)
+- **Per-row info**: arcane name + rank, vosfor/plat ratio, total vosfor across the bought K, trade breakdown (`2 trades · 6/6, 2/6 last · 1834v/trade`), price, quantity, seller link, `[block]`, `[/w]`, `[+rep]`, view-item link.
+- **Whisper format**: K-aware, mirrors Ducanator's per-trade plat breakdown. e.g. `/w seller Hi! I want to buy: 8 x "Arcane Energize" for 240 platinum each, 1440p for the first trade and then 480p for the last trade (Total: 1920p). (warframe.market)`
+- **Notify on new deals** (toggle, default ON): when a scan turns up at least one deal that hasn't been notified about in the last hour, fires a Windows toast via `chrome.notifications`. Dedup keyed by `slug:rank:seller`. Click action focuses the profile tab (where the watchlist panel lives) and copies the top deal's whisper to clipboard.
+- **No status gate**: scans regardless of online/ingame state, since finding deals doesn't require either side to be ingame.
 
 ### Ducanator 2.0
 
@@ -85,6 +117,25 @@ Each row in the results table is colored by outcome:
 - **Gray (noop)** — already at the optimal price, or no ingame competitor.
 - **Red (error)** — fetch or PATCH failed; check the message.
 
+### Arcanes panel
+
+Lives next to DPA on your profile page. One panel, two tabs at the top.
+
+**Auto-Pricer tab** (max-rank arcane sells):
+1. Set the **SMA offset (plat)** — signed integer. `0` = floor at SMA exactly. `+5` = sell at least 5p above SMA. `-5` = willing to undercut down to 5p below SMA.
+2. Set the **Auto-run interval** (default 300s, min 60).
+3. Flip the tab's **Auto-run** toggle ON to enable scheduled scans. Default OFF.
+4. Status line shows `Status: ingame · auto-run on` when ready. Same status gate as DPA: scheduled scans only fire when ingame; manual Run Now ignores the gate.
+5. Same row colors as DPA (move / applied / floor / noop / error).
+
+**Watchlist tab** (find arcane vosfor deals):
+1. Type in the **Add arcane** search box; click a suggestion to add it to your watchlist. Chips appear below; click `×` to remove.
+2. Set **Min vosfor/plat** (efficiency floor; 0 = off) and **Min vosfor/trade** (per-trade payout floor; 0 = off).
+3. Set **Top-M results** (default 10) and **Auto-run interval** (default 600s, min 60).
+4. Toggle **Notify on new deals** (default ON) for Windows toasts on fresh deals.
+5. Flip the tab's **Auto-run** toggle ON to enable scheduled scans. Default OFF.
+6. Each result row shows the arcane name + rank, vosfor/plat ratio (primary), total vosfor across the bought K (secondary), trade breakdown, price × qty, seller link, `[block]`, `[/w]`, `[+rep]`, view-item link.
+
 ### Ducanator 2.0
 
 1. Visit the Ducanator page on warframe.market — panel injects in the top-right.
@@ -113,8 +164,8 @@ The extension also sends `Crossplay: true` on every API call, which surfaces cro
 
 ## Files
 
-- `manifest.json` — Manifest V3. Content script is scoped to `https://warframe.market/profile/*` and `https://warframe.market/tools/ducats*`. Host permissions cover the API origin too. Adds `notifications`, `storage`, and `alarms` permissions: the first two for Ducanator notifications + cache; `alarms` for the SW-driven Ducanator scan scheduler.
-- `content.js` — single-file content script with both panels' UI. The DPA panel still runs its scheduler + scan inline (status detection needs the profile page DOM); the Ducanator panel is now a UI shell that mirrors settings to `chrome.storage.local`, sends manual `wfbh-run-now` to the SW, and renders results streamed back via `wfbh-scan-results` messages.
-- `background.js` — MV3 service worker. Owns the Ducanator scan: reads settings + caches from `chrome.storage.local`, fires `chrome.alarms` ticks, fetches `/v2/orders/item/{slug}` for each cached row, applies the trade math + tier-filter logic, broadcasts results to all open Ducanator tabs, and creates `chrome.notifications` toasts for fresh deals. On notification click, focuses any open Ducanator tab (or opens one) and round-trips the top deal's whisper text for clipboard write. Click→action mappings live in `chrome.storage.session` so they survive SW idle restarts; the alarm itself persists across restarts too.
+- `manifest.json` — Manifest V3. Content script is scoped to `https://warframe.market/profile/*` and `https://warframe.market/tools/ducats*`. Host permissions cover the API origin too. Adds `notifications`, `storage`, and `alarms` permissions: the first two for notifications + cache; `alarms` for the SW-driven Ducanator scan scheduler.
+- `content.js` — single-file content script with all three panels' UI. DPA + Arcanes both run their schedulers + scans inline on the profile page (status detection needs the profile page DOM); the Ducanator panel is a UI shell that mirrors settings to `chrome.storage.local`, sends manual `wfbh-run-now` to the SW, and renders results streamed back via `wfbh-scan-results` messages. Trade math + whisper formatter + `VOSFOR_MAP` live in the shared helpers section near the top so both the Arcane Watchlist and (a duplicated copy in `background.js`) the Ducanator can use them.
+- `background.js` — MV3 service worker. Owns the Ducanator scan: reads settings + caches from `chrome.storage.local`, fires `chrome.alarms` ticks, fetches `/v2/orders/item/{slug}` for each cached row, applies the trade math + tier-filter logic, broadcasts results to all open Ducanator tabs, and creates `chrome.notifications` toasts for fresh deals. Also serves a generic `show-notification` message handler so the Watchlist (which runs in the content script) can fire notifications too; the message carries a `tabUrlPattern` so the click handler routes to the right tab (profile for the watchlist, ducats for Ducanator). Click→action mappings live in `chrome.storage.session` so they survive SW idle restarts; the alarm itself persists across restarts too.
 - `icon.png` — 128×128 icon used by `chrome.notifications` (also serves as the extension icon).
 - `README.md` — this file.

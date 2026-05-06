@@ -333,6 +333,49 @@
       .wfaap-rec.error .wfaap-rec-name { color: #f87171; }
       .wfaap-rec.deal .wfaap-rec-name { color: #4ade80; }
       .wfaap-panel.collapsed .wfaap-body { display: none; }
+      /* Arcanes panel: tab bar + tab body */
+      .wfaa-tab-bar { display: flex; gap: 4px; padding: 8px 12px 0;
+        border-bottom: 1px solid #1e2a3a; }
+      .wfaa-tab-btn { background: transparent; border: 1px solid transparent;
+        border-bottom: none; color: #667788; font-family: inherit; font-size: 12px;
+        font-weight: 600; padding: 6px 12px; cursor: pointer; border-radius: 4px 4px 0 0;
+        transition: color 0.15s, background 0.15s; margin-bottom: -1px; }
+      .wfaa-tab-btn:hover { color: #e0e0e0; }
+      .wfaa-tab-btn.active { color: #00e5ff; background: #131a27;
+        border-color: #1e2a3a #1e2a3a #131a27; }
+      .wfaa-tab-body { display: none; padding: 12px; }
+      .wfaa-tab-body.active { display: block; }
+      .wfaa-sub-toggle-row { display: flex; align-items: center; gap: 8px;
+        margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #1a2332; }
+      .wfaa-sub-toggle-row > span { color: #00e5ff; font-size: 12px;
+        font-weight: 600; flex: 1; }
+      /* Watchlist editor */
+      .wfaa-watch-input-wrap { position: relative; }
+      .wfaa-watch-input { width: 100%; padding: 5px 7px; background: #131a27;
+        color: #e0e0e0; border: 1px solid #2a3a4a; border-radius: 3px;
+        font-size: 12px; font-family: inherit; box-sizing: border-box; }
+      .wfaa-watch-input:focus { outline: none; border-color: #00b4d8; }
+      .wfaa-watch-suggestions { position: absolute; top: 100%; left: 0; right: 0;
+        background: #0d1117; border: 1px solid #2a3a4a; border-top: none;
+        max-height: 200px; overflow-y: auto; z-index: 10000; display: none; }
+      .wfaa-watch-suggestions.open { display: block; }
+      .wfaa-watch-suggest { padding: 5px 8px; cursor: pointer; font-size: 12px;
+        color: #cdd; border-bottom: 1px solid #1a2332; }
+      .wfaa-watch-suggest:last-child { border-bottom: none; }
+      .wfaa-watch-suggest:hover, .wfaa-watch-suggest.highlighted {
+        background: #1a2333; color: #00e5ff; }
+      .wfaa-watch-suggest .wfaa-watch-suggest-vosfor {
+        color: #667788; font-size: 11px; margin-left: 6px; }
+      .wfaa-watch-list { display: flex; flex-wrap: wrap; gap: 4px;
+        margin-top: 8px; min-height: 22px; }
+      .wfaa-watch-empty { color: #556677; font-size: 11px; font-style: italic;
+        padding: 2px 0; }
+      .wfaa-watch-chip { display: inline-flex; align-items: center; gap: 4px;
+        padding: 3px 6px; background: #131a27; border: 1px solid #2a3a4a;
+        border-radius: 3px; font-size: 11px; color: #cdd; }
+      .wfaa-watch-chip-remove { background: none; border: none; color: #ff6b6b;
+        font-size: 13px; cursor: pointer; padding: 0; line-height: 1; }
+      .wfaa-watch-chip-remove:hover { color: #ff4444; }
     `;
     document.head.appendChild(style);
   }
@@ -352,6 +395,190 @@
             <div class="wfaap-rec-detail">${r.detail || ''}</div>
           </div>`;
         }).join('');
+  }
+
+  // ─── Trade math (shared between Ducanator + Watchlist) ───
+  // The in-game trade UI caps each trade at 6 items. Sets are bundles of
+  // parts (P parts per set); arcanes/items are P=1. findOptimalK picks the
+  // largest K (units to buy, ≤ qty) packing into trades that meet BOTH
+  // per-trade floors:
+  //   - items per trade ≥ effFloor (partial trade can't be too small)
+  //   - rewards per trade ≥ minRpt (each trade must clear the rewards floor;
+  //     "rewards" generalises ducats for Ducanator and vosfor for Watchlist)
+  // Returns 0 if no K satisfies both. K is decremented to drop the partial
+  // when it fails — matches the user-expected "drop sub-floor partials".
+  const TRADE_CAP = 6;
+  function findOptimalK(qty, partsPerUnit, effFloor, rewardsPerUnit, minRpt) {
+    const cap = TRADE_CAP;
+    const fullTradeRewards = (cap / partsPerUnit) * rewardsPerUnit;
+    if (fullTradeRewards < minRpt) return 0;
+    for (let K = qty; K >= 1; K--) {
+      const parts = K * partsPerUnit;
+      const rem = parts % cap;
+      if (rem !== 0 && rem < effFloor) continue;
+      if (rem > 0) {
+        const partialRewards = (rem / partsPerUnit) * rewardsPerUnit;
+        if (partialRewards < minRpt) continue;
+      }
+      return K;
+    }
+    return 0;
+  }
+  function computeTradeBreakdown(K, partsPerUnit, rewardsPerUnit) {
+    const cap = TRADE_CAP;
+    const parts = K * partsPerUnit;
+    const fullTrades = Math.floor(parts / cap);
+    const lastRem = parts % cap;
+    const totalTrades = fullTrades + (lastRem > 0 ? 1 : 0);
+    const totalRewards = K * rewardsPerUnit;
+    const rewardsPerTrade = totalTrades > 0 ? Math.floor(totalRewards / totalTrades) : 0;
+    return { totalTrades, fullTrades, lastRem, totalRewards, rewardsPerTrade };
+  }
+  function formatTradeBreakdown(b) {
+    if (b.totalTrades === 1) {
+      const eff = b.lastRem > 0 ? `${b.lastRem}/${TRADE_CAP}` : `${TRADE_CAP}/${TRADE_CAP}`;
+      return `1 trade · ${eff}`;
+    }
+    if (b.lastRem === 0) {
+      return `${b.totalTrades} trades · ${TRADE_CAP}/${TRADE_CAP}`;
+    }
+    return `${b.totalTrades} trades · ${TRADE_CAP}/${TRADE_CAP}, ${b.lastRem}/${TRADE_CAP} last`;
+  }
+  // Build a "/w sellerName Hi! I want to buy: ..." whisper. Mirrors the
+  // formatter in background.js (Ducanator's SW), so changes here should
+  // probably mirror there too.
+  //   K = 1                 → singular ("Hi! I want to buy: \"X\" for Yp.")
+  //   K > 1, single trade   → multi ("K x \"X\" for Yp each (Total: KYp).")
+  //   K > 1, multi-trade    → multi + per-trade plat breakdown
+  // Per-trade strategy: "natural" split when per-trade plat is integer
+  // (always for items P=1; for sets only when P divides 6X and P divides
+  // lastRem*X); otherwise "averaged" with leftover front-loaded into the
+  // first trade so the seller gets the biggest predictable chunk upfront.
+  function formatTradeWhisper({ sellerName, name, ingamePrice, boughtK, partsPerUnit }) {
+    const K = boughtK;
+    const X = ingamePrice;
+    const P = partsPerUnit;
+    const total = K * X;
+    const totalParts = K * P;
+    const fullTrades = Math.floor(totalParts / TRADE_CAP);
+    const lastRem = totalParts % TRADE_CAP;
+    const totalTrades = fullTrades + (lastRem > 0 ? 1 : 0);
+    if (K === 1) {
+      return `/w ${sellerName} Hi! I want to buy: "${name}" for ${X} platinum. (warframe.market)`;
+    }
+    if (totalTrades > 1) {
+      const naturalFullPlat = (TRADE_CAP / P) * X;
+      const naturalLastPlat = lastRem > 0 ? (lastRem / P) * X : 0;
+      const naturalClean = Number.isInteger(naturalFullPlat)
+        && (lastRem === 0 || Number.isInteger(naturalLastPlat));
+      let breakdown;
+      if (naturalClean) {
+        if (lastRem === 0) {
+          breakdown = `${naturalFullPlat}p per trade for ${fullTrades} trades`;
+        } else if (fullTrades > 0) {
+          const fullPart = fullTrades === 1 ? 'first trade' : `first ${fullTrades} trades`;
+          breakdown = `${naturalFullPlat}p for the ${fullPart} and then ${naturalLastPlat}p for the last trade`;
+        } else {
+          breakdown = `${naturalLastPlat}p for the trade`;
+        }
+      } else {
+        const baseRate = Math.floor(total / totalTrades);
+        const firstTrade = total - (totalTrades - 1) * baseRate;
+        if (firstTrade === baseRate) {
+          breakdown = `${baseRate}p per trade for ${totalTrades} trades`;
+        } else {
+          const remaining = totalTrades - 1;
+          const remPhrase = remaining === 1 ? 'next trade' : `next ${remaining} trades`;
+          breakdown = `${firstTrade}p for the first trade and then ${baseRate}p for the ${remPhrase}`;
+        }
+      }
+      return `/w ${sellerName} Hi! I want to buy: ${K} x "${name}" for ${X} platinum each, ${breakdown} (Total: ${total}p). (warframe.market)`;
+    }
+    return `/w ${sellerName} Hi! I want to buy: ${K} x "${name}" for ${X} platinum each (Total: ${total}p). (warframe.market)`;
+  }
+
+  // ─── Arcane data ───
+  // Base vosfor per arcane (R0) — copied from index.html's VOSFOR_MAP. The
+  // vosfor a max-rank arcane dissolves for is base × max_rank_multiplier
+  // (10 for max_rank=3, 21 for max_rank=5). Update this table when DE adds
+  // a new arcane set; the source-of-truth is the website's same constant.
+  const VOSFOR_MAP = {
+    'arcane_acceleration':21,'arcane_aegis':28,'arcane_agility':21,'arcane_arachne':28,'arcane_avenger':28,
+    'arcane_awakening':21,'arcane_barrier':98,'arcane_battery':24,'arcane_bellicose':24,'arcane_blade_charger':20,
+    'arcane_circumvent':24,'arcane_concentration':24,'arcane_blessing':22,'arcane_bodyguard':20,'arcane_camisado':24,
+    'arcane_consequence':14,'arcane_crepuscular':24,'arcane_deflection':21,'arcane_double_back':24,'arcane_energize':98,
+    'arcane_eruption':21,'arcane_escapist':84,'arcane_expertise':24,'arcane_fury':28,'arcane_grace':98,
+    'arcane_guardian':21,'arcane_healing':21,'arcane_hot_shot':84,'arcane_ice':14,'arcane_ice_storm':24,
+    'arcane_impetus':24,'arcane_intention':18,'arcane_momentum':14,'arcane_nullifier':14,'arcane_phantasm':21,
+    'arcane_persistence':24,'arcane_pistoleer':20,'arcane_power_ramp':24,'arcane_precision':28,'arcane_primary_charger':20,'arcane_pulse':28,
+    'arcane_rage':28,'arcane_reaper':84,'arcane_resistance':21,'arcane_rise':22,'arcane_steadfast':24,
+    'arcane_strike':21,'arcane_tanker':20,'arcane_tempo':14,'arcane_trickery':21,'arcane_truculence':24,
+    'arcane_ultimatum':28,'arcane_universal_fallout':84,'arcane_velocity':21,'arcane_victory':21,'arcane_warmth':14,
+    'molt_augmented':22,'molt_efficiency':22,'molt_reconstruct':22,'molt_vigor':22,
+    'theorem_contagion':24,'theorem_demulcent':24,'theorem_infection':24,
+    'emergence_dissipate':22,'emergence_renewed':22,'emergence_savior':22,
+    'magus_accelerant':12,'magus_aggress':18,'magus_anomaly':12,'magus_cadence':18,'magus_cloud':18,
+    'magus_destruct':24,'magus_drive':12,'magus_elevate':24,'magus_firewall':12,'magus_glitch':18,
+    'magus_husk':12,'magus_lockdown':24,'magus_melt':24,'magus_nourish':24,'magus_overload':12,
+    'magus_repair':18,'magus_replenish':18,'magus_revert':24,'magus_vigor':12,
+    'eternal_eradicate':22,'eternal_logistics':22,'eternal_onslaught':22,
+    'virtuos_forge':18,'virtuos_fury':18,'virtuos_ghost':24,'virtuos_null':12,'virtuos_shadow':24,
+    'virtuos_spike':12,'virtuos_strike':18,'virtuos_surge':12,'virtuos_tempo':12,'virtuos_trojan':18,
+    'zid-an-asheir':24,'zid-an-haras':24,'zid-an-osbok':24,'zid-an-sek-eel':24,'zid-an-uskos':24,
+    'fractalized_reset':22,'longbow_sharpshot':84,'primary_blight':24,'primary_bulwark':24,'primary_crux':24,
+    'primary_deadhead':20,'primary_debilitate':24,'primary_dexterity':20,'primary_exhilarate':24,
+    'primary_frostbite':22,'primary_merciless':20,'primary_obstruct':24,'primary_overcharge':24,
+    'primary_plated_round':24,'shotgun_vendetta':24,
+    'akimbo_slip_shot':24,'cascadia_accuracy':22,'cascadia_empowered':22,'cascadia_flare':22,
+    'cascadia_overcharge':22,'conjunction_voltage':22,'secondary_deadhead':20,'secondary_dexterity':20,
+    'secondary_encumber':24,'secondary_enervate':24,'secondary_fortifier':24,'secondary_irradiate':24,
+    'secondary_kinship':24,'secondary_merciless':20,'secondary_outburst':24,'secondary_shiver':84,
+    'secondary_surge':24,
+    'melee_afflictions':24,'melee_animosity':24,'melee_careen':24,'melee_crescendo':84,'melee_doughty':24,
+    'melee_duplicate':84,'melee_exposure':24,'melee_fortification':18,'melee_influence':24,
+    'melee_retaliation':18,'melee_vortex':24,
+    'pax_bolt':24,'pax_charge':24,'pax_seeker':24,'pax_soar':24,
+    'residual_boils':24,'residual_malodor':24,'residual_shock':24,'residual_viremia':24,
+    'exodia_brave':24,'exodia_contagion':84,'exodia_epidemic':84,'exodia_force':24,'exodia_hunt':24,'exodia_might':24,
+    'exodia_triumph':18,'exodia_valor':18,
+  };
+  // Max-rank vosfor multiplier by max_rank value from the items catalog.
+  // R5 max → ×21 (max-rank dissolve gives 21x base); R3 max → ×10.
+  function maxRankMultiplier(maxRank) {
+    if (maxRank === 5) return 21;
+    if (maxRank === 3) return 10;
+    return null;
+  }
+  function maxRankVosfor(slug, maxRank) {
+    const base = VOSFOR_MAP[slug];
+    const mult = maxRankMultiplier(maxRank);
+    if (base == null || mult == null) return null;
+    return base * mult;
+  }
+  function isArcaneSlug(slug) {
+    return slug != null && Object.prototype.hasOwnProperty.call(VOSFOR_MAP, slug);
+  }
+
+  // ─── 48hr SMA fetcher ───
+  // /v1/items/{slug}/statistics → payload.statistics_closed['48hours'] is an
+  // array of per-day-per-rank entries with moving_avg + volume. Return the
+  // most recent entry's moving_avg matching the requested mod_rank, or null
+  // if none. (Same pattern the website uses for its vosfor/plat metric.)
+  async function fetchMovingAvg(slug, modRank) {
+    const resp = await fetch(`https://api.warframe.market/v1/items/${encodeURIComponent(slug)}/statistics`, {
+      headers: { 'Language': 'en', 'Platform': 'pc', 'Crossplay': 'true' },
+      credentials: 'include',
+    });
+    if (!resp.ok) throw new Error(`/v1/items/${slug}/statistics → HTTP ${resp.status}`);
+    const data = await resp.json();
+    const stats48 = data.payload?.statistics_closed?.['48hours'] || [];
+    for (let i = stats48.length - 1; i >= 0; i--) {
+      const entry = stats48[i];
+      if (entry.mod_rank === modRank && entry.moving_avg != null) {
+        return entry.moving_avg;
+      }
+    }
+    return null;
   }
 
   // ════════════════════════════════════════════════════════════
@@ -1867,14 +2094,930 @@
   }
 
   // ════════════════════════════════════════════════════════════
+  // ARCANES PANEL (Auto-Pricer + Watchlist tabs, profile page)
+  // ════════════════════════════════════════════════════════════
+  // Two arcane-focused features in one tabbed panel that lives next to DPA
+  // on the user's profile page:
+  //   - Auto-Pricer: SMA-floored undercut bot for max-rank arcane sells
+  //                  (sister of DPA, but floor source is 48hr SMA ± offset
+  //                  instead of plat/1k endo)
+  //   - Watchlist: vosfor/plat hunter for a user-curated arcane shortlist
+  //                (sister of Ducanator, but per-arcane instead of per-table)
+  // Each tab has its own master toggle + settings; the panel chrome
+  // (header, drag, collapse, active tab) is shared.
+  const AAP = {
+    COLLAPSED: 'wfaa-collapsed',
+    ACTIVE_TAB: 'wfaa-active-tab',          // 'ap' | 'wl'
+    DEFAULT_ACTIVE_TAB: 'ap',
+    // Auto-Pricer (sell side)
+    AP_ENABLED: 'wfaa-ap-enabled',
+    AP_OFFSET: 'wfaa-ap-offset',            // signed integer plat (e.g. -5, +10)
+    AP_INTERVAL: 'wfaa-ap-interval',        // seconds
+    AP_LAST_SCAN: 'wfaa-ap-last-scan',
+    AP_SKIP_INITIAL: 'wfaa-ap-skip-initial',
+    AP_LAST_RUN: 'wfaa-ap-last-run',
+    DEFAULT_AP_OFFSET: 0,
+    DEFAULT_AP_INTERVAL: 300,
+    AP_POST_APPLY_REFRESH_MS: 2000,
+    // Watchlist (buy side)
+    WL_ENABLED: 'wfaa-wl-enabled',
+    WL_LIST: 'wfaa-wl-list',                // JSON array of arcane slugs
+    WL_MIN_VPP: 'wfaa-wl-min-vpp',          // min vosfor/plat
+    WL_MIN_VPT: 'wfaa-wl-min-vpt',          // min vosfor/trade
+    WL_TOP_M: 'wfaa-wl-top-m',
+    WL_INTERVAL: 'wfaa-wl-interval',
+    WL_NOTIFY_ENABLED: 'wfaa-wl-notify-enabled',
+    WL_NOTIFIED_DEALS: 'wfaa-wl-notified-deals',
+    WL_LAST_SCAN: 'wfaa-wl-last-scan',
+    DEFAULT_WL_MIN_VPP: 0,
+    DEFAULT_WL_MIN_VPT: 0,
+    DEFAULT_WL_TOP_M: 10,
+    DEFAULT_WL_INTERVAL: 600,
+    DEFAULT_WL_NOTIFY_ENABLED: true,
+    WL_NOTIFY_PRUNE_MS: 60 * 60 * 1000,
+    REVIEW_TEXT: 'fast, friendly, and great prices', // text posted by [+rep]
+  };
+
+  // ─── Watchlist storage helpers ───
+  function getWatchlist() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(AAP.WL_LIST) || '[]');
+      return Array.isArray(raw) ? raw.filter(s => typeof s === 'string' && s) : [];
+    } catch { return []; }
+  }
+  function setWatchlist(arr) {
+    localStorage.setItem(AAP.WL_LIST, JSON.stringify(arr));
+  }
+  function addToWatchlist(slug) {
+    const s = (slug || '').toLowerCase().trim();
+    if (!s || !isArcaneSlug(s)) return false;
+    const list = getWatchlist();
+    if (list.includes(s)) return false;
+    list.push(s);
+    setWatchlist(list);
+    return true;
+  }
+  function removeFromWatchlist(slug) {
+    const s = (slug || '').toLowerCase().trim();
+    setWatchlist(getWatchlist().filter(x => x !== s));
+  }
+  function getWatchlistNotifiedDeals() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(AAP.WL_NOTIFIED_DEALS) || '{}');
+      return (raw && typeof raw === 'object') ? raw : {};
+    } catch { return {}; }
+  }
+  function setWatchlistNotifiedDeals(map) {
+    localStorage.setItem(AAP.WL_NOTIFIED_DEALS, JSON.stringify(map));
+  }
+  function pruneWatchlistNotifiedDeals(map) {
+    const cutoff = Date.now() - AAP.WL_NOTIFY_PRUNE_MS;
+    const out = {};
+    for (const [id, ts] of Object.entries(map)) {
+      if (typeof ts === 'number' && ts >= cutoff) out[id] = ts;
+    }
+    return out;
+  }
+
+  // ─── Arcane name lookup (via items catalog) ───
+  // Build a {slug: displayName} map for arcanes (slugs in VOSFOR_MAP). Used
+  // by the watchlist autocomplete + chip rendering. Falls back to title-
+  // cased slug when the catalog hasn't loaded yet.
+  let _arcaneNamesPromise = null;
+  async function getArcaneNamesMap() {
+    if (_arcaneNamesPromise) return _arcaneNamesPromise;
+    _arcaneNamesPromise = (async () => {
+      try {
+        const { bySlug } = await getItemsMaps();
+        const out = {};
+        for (const slug of Object.keys(VOSFOR_MAP)) {
+          const item = bySlug[slug];
+          out[slug] = item?.i18n?.en?.name || prettifySlug(slug);
+        }
+        return out;
+      } catch {
+        const out = {};
+        for (const slug of Object.keys(VOSFOR_MAP)) out[slug] = prettifySlug(slug);
+        return out;
+      }
+    })();
+    return _arcaneNamesPromise;
+  }
+  function prettifySlug(slug) {
+    return String(slug || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  // ─── Per-arcane max-rank cache (catalog lookup) ───
+  // Reads max_rank from /v2/items/{slug}. Cached forever per session since
+  // max_rank is fixed per arcane. Falls back to 5 (the most common case)
+  // when the lookup fails — wrong-multiplier risk is low because the only
+  // R3-max arcanes are Tektolyst-family, well-known.
+  const _maxRankCache = {};
+  async function getArcaneMaxRank(slug) {
+    if (slug in _maxRankCache) return _maxRankCache[slug];
+    try {
+      const { bySlug } = await getItemsMaps();
+      const cataItem = bySlug[slug];
+      if (cataItem && typeof cataItem.maxRank === 'number') {
+        _maxRankCache[slug] = cataItem.maxRank;
+        return cataItem.maxRank;
+      }
+      const data = await api(`/v2/items/${encodeURIComponent(slug)}`);
+      const mr = data?.data?.maxRank;
+      _maxRankCache[slug] = (typeof mr === 'number') ? mr : 5;
+    } catch {
+      _maxRankCache[slug] = 5;
+    }
+    return _maxRankCache[slug];
+  }
+
+  function injectArcanesPanel() {
+    if (document.getElementById('wfaa-panel')) return;
+    const panel = document.createElement('div');
+    panel.id = 'wfaa-panel';
+    panel.className = 'wfaap-panel';
+    // Default-position offset so it doesn't stack directly under the DPA
+    // panel (which spawns at top: 80px right: 16px). User can drag freely.
+    panel.style.top = '80px';
+    panel.style.right = '396px';
+    panel.innerHTML = `
+      <div class="wfaap-header">
+        <span>Arcanes</span>
+        <div class="wfaap-header-controls">
+          <button class="wfaap-btn-icon" id="wfaa-collapse" title="Collapse">−</button>
+        </div>
+      </div>
+      <div class="wfaap-body" style="padding: 0;">
+        <div class="wfaa-tab-bar">
+          <button class="wfaa-tab-btn" data-tab="ap" type="button">Auto-Pricer</button>
+          <button class="wfaa-tab-btn" data-tab="wl" type="button">Watchlist</button>
+        </div>
+        <div class="wfaa-tab-body" data-tab="ap">
+          <div class="wfaa-sub-toggle-row" title="Auto-runs scan + apply (PATCH) at the configured interval when status is ingame. Manual Run Now ignores the toggle."><span>Auto-run</span>
+            <label class="wfaap-toggle"><input type="checkbox" id="wfaa-ap-enabled"><span class="wfaap-toggle-track"></span></label>
+          </div>
+          <div class="wfaap-row-label" title="Floor in plat = 48hr SMA + this offset. Positive = more conservative (sell higher); negative = more aggressive (willing to undercut below SMA). Per-rank SMA matching the listing's rank."><span>SMA offset (plat)</span>
+            <input id="wfaa-ap-offset" type="number" step="1"></div>
+          <div class="wfaap-row-label"><span>Auto-run interval (sec)</span>
+            <input id="wfaa-ap-interval" type="number" step="1" min="60"></div>
+          <button class="wfaap-run" id="wfaa-ap-run">Run Now</button>
+          <div class="wfaap-meta" id="wfaa-ap-meta">Status: ?</div>
+          <div class="wfaap-status" id="wfaa-ap-status">Idle.</div>
+          <div class="wfaap-results" id="wfaa-ap-results"></div>
+        </div>
+        <div class="wfaa-tab-body" data-tab="wl">
+          <div class="wfaa-sub-toggle-row" title="Auto-runs the watchlist scan at the configured interval. No status gate (you can find deals regardless of your own ingame state)."><span>Auto-run</span>
+            <label class="wfaap-toggle"><input type="checkbox" id="wfaa-wl-enabled"><span class="wfaap-toggle-track"></span></label>
+          </div>
+          <div class="wfaap-row-label" title="Drop result rows whose vosfor/plat falls below this. 0 = off."><span>Min vosfor/plat</span>
+            <input id="wfaa-wl-min-vpp" type="number" step="0.1" min="0"></div>
+          <div class="wfaap-row-label" title="Drop result rows whose vosfor/trade (vosfor delivered per in-game trade slot, capped at 6 max-rank arcanes per trade) falls below this. 0 = off."><span>Min vosfor/trade</span>
+            <input id="wfaa-wl-min-vpt" type="number" step="1" min="0"></div>
+          <div class="wfaap-row-label"><span>Top-M results to show</span>
+            <input id="wfaa-wl-top-m" type="number" step="1" min="1"></div>
+          <div class="wfaap-row-label"><span>Auto-run interval (sec)</span>
+            <input id="wfaa-wl-interval" type="number" step="1" min="60"></div>
+          <div class="wfaap-row-label" title="Show a Windows notification when a scan turns up a fresh deal that hasn't been notified about in the last hour. Click the notification to focus this tab and copy the top deal's whisper to clipboard."><span>Notify on new deals</span>
+            <input id="wfaa-wl-notify-enabled" type="checkbox"></div>
+          <div class="wfaap-row-label" title="Search and add an arcane to your watchlist. Only max-rank versions are scanned. Click a suggestion to add."><span>Add arcane</span>
+            <div class="wfaa-watch-input-wrap" style="flex: 1;">
+              <input id="wfaa-wl-input" class="wfaa-watch-input" type="text" placeholder="Type to search...">
+              <div id="wfaa-wl-suggestions" class="wfaa-watch-suggestions"></div>
+            </div>
+          </div>
+          <div id="wfaa-wl-list" class="wfaa-watch-list"></div>
+          <button class="wfaap-run" id="wfaa-wl-run" style="margin-top: 10px;">Run Now</button>
+          <div class="wfaap-status" id="wfaa-wl-status">Idle.</div>
+          <div class="wfaap-results" id="wfaa-wl-results"></div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(panel);
+
+    // ─── Tab switching ───
+    const tabBtns = panel.querySelectorAll('.wfaa-tab-btn');
+    const tabBodies = panel.querySelectorAll('.wfaa-tab-body');
+    function setActiveTab(tab) {
+      tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      tabBodies.forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      localStorage.setItem(AAP.ACTIVE_TAB, tab);
+    }
+    tabBtns.forEach(b => b.addEventListener('click', () => setActiveTab(b.dataset.tab)));
+    setActiveTab(localStorage.getItem(AAP.ACTIVE_TAB) || AAP.DEFAULT_ACTIVE_TAB);
+
+    // ─── Collapse ───
+    const collapseBtn = panel.querySelector('#wfaa-collapse');
+    if (localStorage.getItem(AAP.COLLAPSED) === '1') {
+      panel.classList.add('collapsed');
+      collapseBtn.textContent = '+';
+    }
+    collapseBtn.addEventListener('click', () => {
+      const collapsed = panel.classList.toggle('collapsed');
+      collapseBtn.textContent = collapsed ? '+' : '−';
+      localStorage.setItem(AAP.COLLAPSED, collapsed ? '1' : '0');
+    });
+
+    // ─── Auto-Pricer tab wiring ───
+    const apOffsetInput = panel.querySelector('#wfaa-ap-offset');
+    apOffsetInput.value = localStorage.getItem(AAP.AP_OFFSET) || String(AAP.DEFAULT_AP_OFFSET);
+    apOffsetInput.addEventListener('input', () => localStorage.setItem(AAP.AP_OFFSET, apOffsetInput.value));
+
+    const apIntervalInput = panel.querySelector('#wfaa-ap-interval');
+    apIntervalInput.value = localStorage.getItem(AAP.AP_INTERVAL) || String(AAP.DEFAULT_AP_INTERVAL);
+    apIntervalInput.addEventListener('input', () => {
+      localStorage.setItem(AAP.AP_INTERVAL, apIntervalInput.value);
+      scheduleArcaneAutoPricer(panel);
+    });
+
+    const apEnabledInput = panel.querySelector('#wfaa-ap-enabled');
+    apEnabledInput.checked = localStorage.getItem(AAP.AP_ENABLED) === '1';
+    apEnabledInput.addEventListener('change', () => {
+      const enabled = apEnabledInput.checked;
+      localStorage.setItem(AAP.AP_ENABLED, enabled ? '1' : '0');
+      if (enabled) {
+        scheduleArcaneAutoPricer(panel);
+        (async () => {
+          const status = await refreshArcaneAutoPricerStatus(panel);
+          if (status === 'ingame') runArcaneAutoPricerScan(panel);
+        })();
+      } else {
+        cancelArcaneAutoPricerSchedule(panel);
+        refreshArcaneAutoPricerStatus(panel);
+      }
+    });
+
+    panel.querySelector('#wfaa-ap-run').addEventListener('click', () => runArcaneAutoPricerScan(panel));
+
+    // ─── Watchlist tab wiring ───
+    const wlMinVppInput = panel.querySelector('#wfaa-wl-min-vpp');
+    wlMinVppInput.value = localStorage.getItem(AAP.WL_MIN_VPP) || String(AAP.DEFAULT_WL_MIN_VPP);
+    wlMinVppInput.addEventListener('input', () => localStorage.setItem(AAP.WL_MIN_VPP, wlMinVppInput.value));
+
+    const wlMinVptInput = panel.querySelector('#wfaa-wl-min-vpt');
+    wlMinVptInput.value = localStorage.getItem(AAP.WL_MIN_VPT) || String(AAP.DEFAULT_WL_MIN_VPT);
+    wlMinVptInput.addEventListener('input', () => localStorage.setItem(AAP.WL_MIN_VPT, wlMinVptInput.value));
+
+    const wlTopMInput = panel.querySelector('#wfaa-wl-top-m');
+    wlTopMInput.value = localStorage.getItem(AAP.WL_TOP_M) || String(AAP.DEFAULT_WL_TOP_M);
+    wlTopMInput.addEventListener('input', () => localStorage.setItem(AAP.WL_TOP_M, wlTopMInput.value));
+
+    const wlIntervalInput = panel.querySelector('#wfaa-wl-interval');
+    wlIntervalInput.value = localStorage.getItem(AAP.WL_INTERVAL) || String(AAP.DEFAULT_WL_INTERVAL);
+    wlIntervalInput.addEventListener('input', () => {
+      localStorage.setItem(AAP.WL_INTERVAL, wlIntervalInput.value);
+      scheduleWatchlist(panel);
+    });
+
+    const wlNotifyInput = panel.querySelector('#wfaa-wl-notify-enabled');
+    const notifyRaw = localStorage.getItem(AAP.WL_NOTIFY_ENABLED);
+    wlNotifyInput.checked = notifyRaw == null ? AAP.DEFAULT_WL_NOTIFY_ENABLED : notifyRaw === '1';
+    wlNotifyInput.addEventListener('change', () => {
+      localStorage.setItem(AAP.WL_NOTIFY_ENABLED, wlNotifyInput.checked ? '1' : '0');
+    });
+
+    const wlEnabledInput = panel.querySelector('#wfaa-wl-enabled');
+    wlEnabledInput.checked = localStorage.getItem(AAP.WL_ENABLED) === '1';
+    wlEnabledInput.addEventListener('change', () => {
+      const enabled = wlEnabledInput.checked;
+      localStorage.setItem(AAP.WL_ENABLED, enabled ? '1' : '0');
+      if (enabled) {
+        scheduleWatchlist(panel);
+        runWatchlistScan(panel);
+      } else {
+        cancelWatchlistSchedule(panel);
+      }
+    });
+
+    panel.querySelector('#wfaa-wl-run').addEventListener('click', () => runWatchlistScan(panel));
+
+    // ─── Watchlist autocomplete + chip list ───
+    const wlInput = panel.querySelector('#wfaa-wl-input');
+    const wlSuggestions = panel.querySelector('#wfaa-wl-suggestions');
+    const wlListEl = panel.querySelector('#wfaa-wl-list');
+
+    function renderWatchlistChips(namesMap) {
+      const list = getWatchlist();
+      if (list.length === 0) {
+        wlListEl.innerHTML = '<div class="wfaa-watch-empty">Watchlist empty. Search above to add arcanes.</div>';
+        return;
+      }
+      wlListEl.innerHTML = list.map(slug => `
+        <span class="wfaa-watch-chip" data-slug="${escapeHtml(slug)}">
+          ${escapeHtml(namesMap?.[slug] || prettifySlug(slug))}
+          <button class="wfaa-watch-chip-remove" data-slug="${escapeHtml(slug)}" title="Remove from watchlist">×</button>
+        </span>
+      `).join('');
+    }
+    wlListEl.addEventListener('click', (e) => {
+      if (!e.target.classList.contains('wfaa-watch-chip-remove')) return;
+      const slug = e.target.dataset.slug;
+      if (!slug) return;
+      removeFromWatchlist(slug);
+      // Re-render with the cached names map (fast path) or fall back.
+      getArcaneNamesMap().then(renderWatchlistChips, () => renderWatchlistChips({}));
+    });
+    // Initial chip render uses prettified slugs; refreshes once names load.
+    renderWatchlistChips({});
+    getArcaneNamesMap().then(renderWatchlistChips).catch(() => {});
+
+    function closeSuggestions() {
+      wlSuggestions.classList.remove('open');
+      wlSuggestions.innerHTML = '';
+    }
+    async function refreshSuggestions() {
+      const q = (wlInput.value || '').toLowerCase().trim();
+      if (!q) { closeSuggestions(); return; }
+      const namesMap = await getArcaneNamesMap();
+      const watched = new Set(getWatchlist());
+      const matches = [];
+      for (const slug of Object.keys(VOSFOR_MAP)) {
+        if (watched.has(slug)) continue;
+        const name = namesMap[slug] || prettifySlug(slug);
+        if (slug.includes(q) || name.toLowerCase().includes(q)) {
+          matches.push({ slug, name });
+        }
+        if (matches.length >= 30) break;
+      }
+      if (matches.length === 0) {
+        wlSuggestions.innerHTML = `<div class="wfaa-watch-suggest" style="cursor: default; color: #556677;">No matches.</div>`;
+      } else {
+        wlSuggestions.innerHTML = matches.map(m => {
+          const baseV = VOSFOR_MAP[m.slug];
+          return `<div class="wfaa-watch-suggest" data-slug="${escapeHtml(m.slug)}">${escapeHtml(m.name)}<span class="wfaa-watch-suggest-vosfor">base ${baseV}v</span></div>`;
+        }).join('');
+      }
+      wlSuggestions.classList.add('open');
+    }
+    wlInput.addEventListener('input', refreshSuggestions);
+    wlInput.addEventListener('focus', refreshSuggestions);
+    wlInput.addEventListener('blur', () => setTimeout(closeSuggestions, 150));
+    wlSuggestions.addEventListener('mousedown', (e) => {
+      // mousedown rather than click so the input's blur handler doesn't
+      // close the suggestions before our click handler fires.
+      const target = e.target.closest('.wfaa-watch-suggest');
+      if (!target || !target.dataset.slug) return;
+      e.preventDefault();
+      if (addToWatchlist(target.dataset.slug)) {
+        wlInput.value = '';
+        closeSuggestions();
+        getArcaneNamesMap().then(renderWatchlistChips, () => renderWatchlistChips({}));
+      }
+    });
+
+    // ─── Results delegated click handler (block / [/w] / [+rep]) ───
+    // Same shape as Ducanator. Reuses the existing wfaap-* link classes
+    // since the buttons render identically. Blocklist + rep target the
+    // same global blocklist + REVIEW_TEXT respectively.
+    panel.querySelector('#wfaa-wl-results').addEventListener('click', (e) => {
+      handleResultLinkClick(e, panel);
+    });
+
+    // ─── Service-worker-originated copy-whisper handler ───
+    // Fired when the user clicks a watchlist notification while the
+    // profile tab is already open. The SW round-trips the whisper text
+    // here so we can write it to the clipboard in document context.
+    if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+      chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+        if (!msg || msg.type !== 'copy-whisper') return false;
+        writeWhisperToClipboard(String(msg.text || ''), sendResponse);
+        return true;
+      });
+    }
+
+    makeDraggable(panel, panel.querySelector('.wfaap-header'));
+  }
+
+  // Shared click handler for [block]/[/w]/[+rep] links inside any results
+  // container. Mirrors the Ducanator-side behavior so behaviour is uniform.
+  function handleResultLinkClick(e, panel) {
+    const target = e.target;
+    if (!target || !target.classList) return;
+    if (target.classList.contains('wfaap-block-seller')) {
+      e.preventDefault();
+      const slug = target.dataset.slug;
+      if (slug) {
+        addToBlocklist(slug);
+        const sel = `.wfaap-block-seller[data-slug="${CSS.escape(slug)}"]`;
+        panel.querySelectorAll(sel).forEach(el => el.closest('.wfaap-rec')?.remove());
+      }
+      return;
+    }
+    if (target.classList.contains('wfaap-copy-msg')) {
+      e.preventDefault();
+      const message = target.dataset.message || '';
+      if (!message) return;
+      const original = target.textContent;
+      const flash = (label) => {
+        target.textContent = label;
+        target.classList.add('copied');
+        setTimeout(() => {
+          target.textContent = original;
+          target.classList.remove('copied');
+        }, 1200);
+      };
+      writeWhisperToClipboard(message, (r) => flash(r?.ok ? 'copied!' : 'copy failed'));
+      return;
+    }
+    if (target.classList.contains('wfaap-rep-seller')) {
+      e.preventDefault();
+      if (target.dataset.busy === '1') return;
+      const sellerSlug = target.dataset.slug;
+      if (!sellerSlug) return;
+      const original = target.textContent;
+      target.dataset.busy = '1';
+      target.textContent = 'rep...';
+      postReview(sellerSlug, AAP.REVIEW_TEXT)
+        .then(() => {
+          target.textContent = "rep'd!";
+          target.classList.add('copied');
+          setTimeout(() => {
+            target.textContent = original;
+            target.classList.remove('copied');
+            target.dataset.busy = '0';
+          }, 1500);
+        })
+        .catch((err) => {
+          target.textContent = `failed (${String(err.message || err).slice(0, 40)})`;
+          target.style.color = '#f87171';
+          setTimeout(() => {
+            target.textContent = original;
+            target.style.color = '';
+            target.dataset.busy = '0';
+          }, 2500);
+        });
+    }
+  }
+
+  // ─── Arcane Auto-Pricer (sell side) ───
+  async function refreshArcaneAutoPricerStatus(panel) {
+    const mySlug = getMySlug();
+    const { status, source } = await detectMyStatus(mySlug);
+    const enabled = localStorage.getItem(AAP.AP_ENABLED) === '1';
+    const meta = panel.querySelector('#wfaa-ap-meta');
+    if (meta) {
+      let auto;
+      if (!enabled) auto = 'auto-run off';
+      else if (status === 'ingame') auto = 'auto-run on';
+      else auto = 'auto-run paused';
+      meta.innerHTML = `Status: <span class="${escapeHtml(status)}">${escapeHtml(status)}</span> · ${escapeHtml(auto)} <span style="color:#445">(via ${source})</span>`;
+    }
+    return status;
+  }
+
+  function cancelArcaneAutoPricerSchedule(panel) {
+    if (panel._wfaaApTimer) clearInterval(panel._wfaaApTimer);
+    if (panel._wfaaApTimeout) clearTimeout(panel._wfaaApTimeout);
+    panel._wfaaApTimer = null;
+    panel._wfaaApTimeout = null;
+  }
+
+  function scheduleArcaneAutoPricer(panel) {
+    cancelArcaneAutoPricerSchedule(panel);
+    if (localStorage.getItem(AAP.AP_ENABLED) !== '1') return;
+
+    const intervalMs = Math.max(60, parseInt(panel.querySelector('#wfaa-ap-interval').value, 10) || AAP.DEFAULT_AP_INTERVAL) * 1000;
+    const lastScan = parseInt(localStorage.getItem(AAP.AP_LAST_SCAN) || '0', 10);
+    const elapsed = Date.now() - lastScan;
+    const initialDelay = lastScan > 0 ? Math.max(0, intervalMs - elapsed) : intervalMs;
+
+    const tick = async () => {
+      if (localStorage.getItem(AAP.AP_ENABLED) !== '1') return;
+      const status = await refreshArcaneAutoPricerStatus(panel);
+      if (status === 'ingame') runArcaneAutoPricerScan(panel);
+    };
+
+    panel._wfaaApTimeout = setTimeout(() => {
+      tick();
+      panel._wfaaApTimer = setInterval(tick, intervalMs);
+    }, initialDelay);
+  }
+
+  // The Auto-Pricer's per-listing walk-up: same shape as DPA's
+  // findOptimalPriceTier, but the floor is an absolute plat number
+  // (SMA + offset) instead of a derived plat/1k endo ratio.
+  function findOptimalPlatTier(competitors, floorPlat) {
+    for (let i = 0; i < competitors.length; i++) {
+      const newPrice = competitors[i].platinum - 1;
+      if (newPrice >= floorPlat) {
+        return {
+          position: i + 1, totalCompetitors: competitors.length,
+          competitor: competitors[i], newPrice,
+        };
+      }
+    }
+    return null;
+  }
+
+  async function runArcaneAutoPricerScan(panel) {
+    if (panel._wfaaApBusy) return;
+    panel._wfaaApBusy = true;
+
+    const status = panel.querySelector('#wfaa-ap-status');
+    const results = panel.querySelector('#wfaa-ap-results');
+    const runBtn = panel.querySelector('#wfaa-ap-run');
+    const offset = parseInt(panel.querySelector('#wfaa-ap-offset').value, 10) || 0;
+
+    runBtn.disabled = true;
+    results.innerHTML = '';
+    status.textContent = 'Loading item catalog...';
+
+    try {
+      const mySlug = getMySlug();
+      if (!mySlug) throw new Error('No profile slug.');
+      const { byId } = await getItemsMaps();
+      status.textContent = 'Loading your listings...';
+      const myOrders = await getMyOrders(mySlug);
+
+      const sells = myOrders.filter(o => o.type === 'sell');
+      // Filter to arcane sells that are visible. Rank check happens per-
+      // listing below (we want to skip non-max-rank listings without an
+      // SMA path). isArcaneSlug checks against the hardcoded VOSFOR_MAP.
+      const targets = [];
+      for (const order of sells) {
+        if (order.visible !== true) continue;
+        const item = byId[order.itemId];
+        if (!item || !isArcaneSlug(item.slug)) continue;
+        targets.push({ order, item });
+      }
+      const skipped = sells.length - targets.length;
+
+      const recs = [];
+      for (let i = 0; i < targets.length; i++) {
+        const { order, item } = targets[i];
+        const slug = item.slug;
+        const itemName = item.i18n?.en?.name || prettifySlug(slug);
+        status.textContent = `Scanning ${i + 1}/${targets.length}: ${itemName}`;
+        try {
+          // Per-rank scoping: ignore listings that aren't at this arcane's
+          // max rank (user said they only sell max-rank). Also skip if
+          // we can't determine max rank.
+          const maxRank = await getArcaneMaxRank(slug);
+          if (order.rank !== maxRank) {
+            recs.push({
+              name: itemName, kind: 'noop',
+              detail: `Skipping: listing is rank ${order.rank} but max-rank is ${maxRank} (auto-pricer only manages max-rank listings)`,
+            });
+            continue;
+          }
+
+          const sma = await fetchMovingAvg(slug, maxRank);
+          if (sma == null) {
+            recs.push({
+              name: itemName, kind: 'error',
+              detail: `No 48hr SMA available at rank ${maxRank}; can't compute floor. Hold at ${order.platinum}p.`,
+            });
+            continue;
+          }
+          const floorPlat = Math.round(sma + offset);
+
+          const orders = await getItemOrders(slug);
+          const competitors = competingIngameSells(orders, mySlug, maxRank);
+          if (competitors.length === 0) {
+            recs.push({
+              name: itemName, kind: 'noop',
+              detail: `No ingame competitor (floor ${floorPlat}p, SMA ${Math.round(sma)}p ${offset >= 0 ? '+' : ''}${offset}). Leave at ${order.platinum}p.`,
+            });
+            continue;
+          }
+
+          const pick = findOptimalPlatTier(competitors, floorPlat);
+          if (!pick) {
+            recs.push({
+              name: itemName, kind: 'floor',
+              detail: `Every undercut tier (1-${competitors.length}) lands below floor ${floorPlat}p (SMA ${Math.round(sma)}p ${offset >= 0 ? '+' : ''}${offset}). Hold at ${order.platinum}p.`,
+            });
+          } else if (pick.newPrice === order.platinum) {
+            recs.push({
+              name: itemName, kind: 'noop',
+              detail: `Already at ${order.platinum}p: position ${pick.position}/${pick.totalCompetitors}. Floor ${floorPlat}p.`,
+              position: pick.position,
+              totalCompetitors: pick.totalCompetitors,
+            });
+          } else {
+            recs.push({
+              name: itemName, kind: 'move',
+              detail: `${order.platinum}p → ${pick.newPrice}p · position ${pick.position}/${pick.totalCompetitors} · floor ${floorPlat}p (SMA ${Math.round(sma)}p ${offset >= 0 ? '+' : ''}${offset})`,
+              orderId: order.id,
+              oldPrice: order.platinum,
+              newPrice: pick.newPrice,
+              position: pick.position,
+              totalCompetitors: pick.totalCompetitors,
+              patch: {
+                visible: order.visible,
+                platinum: pick.newPrice,
+                quantity: order.quantity,
+                rank: order.rank,
+              },
+            });
+          }
+        } catch (err) {
+          recs.push({ name: itemName, kind: 'error', detail: String(err.message || err) });
+        }
+        if (i < targets.length - 1) await sleep(PACE_MS);
+      }
+
+      // Sort: ascending position (best slot first), then errors/holds at the bottom.
+      recs.sort((a, b) => {
+        const aPos = (a.position != null) ? a.position : Infinity;
+        const bPos = (b.position != null) ? b.position : Infinity;
+        return aPos - bPos;
+      });
+
+      panel._wfaaApAllRecs = recs;
+      renderRecs(results, recs);
+
+      // Auto-apply
+      const moves = recs.filter(r => r.kind === 'move');
+      let ok = 0, fail = 0;
+      if (moves.length > 0) {
+        for (let i = 0; i < moves.length; i++) {
+          const m = moves[i];
+          status.textContent = `Applying ${i + 1}/${moves.length}: ${m.name}...`;
+          try {
+            await patchOrder(m.orderId, m.patch);
+            m.kind = 'applied';
+            m.detail = `Applied: now ${m.newPrice}p (was ${m.oldPrice}p) · position ${m.position}/${m.totalCompetitors}`;
+            ok++;
+          } catch (err) {
+            m.kind = 'error';
+            m.detail = `Failed: ${err.message || err}`;
+            fail++;
+          }
+          renderRecs(results, recs);
+          if (i < moves.length - 1) await sleep(APPLY_PACE_MS);
+        }
+        status.textContent = `Scanned ${targets.length} arcanes (${skipped} skipped). ${ok} applied, ${fail} failed.`;
+      } else {
+        status.textContent = `Scanned ${targets.length} arcanes (${skipped} skipped). No price changes needed.`;
+      }
+
+      localStorage.setItem(AAP.AP_LAST_SCAN, String(Date.now()));
+
+      // Refresh-on-apply: same trick DPA uses so the page picks up the new prices.
+      if (ok > 0) {
+        try {
+          sessionStorage.setItem(AAP.AP_LAST_RUN, JSON.stringify({
+            recs, status: status.textContent,
+          }));
+        } catch (e) {}
+        sessionStorage.setItem(AAP.AP_SKIP_INITIAL, '1');
+        status.textContent += ` Refreshing page to show new prices...`;
+        setTimeout(() => location.reload(), AAP.AP_POST_APPLY_REFRESH_MS);
+      }
+    } catch (err) {
+      status.textContent = `Error: ${err.message || err}`;
+    } finally {
+      runBtn.disabled = false;
+      panel._wfaaApBusy = false;
+    }
+  }
+
+  // ─── Watchlist (buy side) ───
+  function cancelWatchlistSchedule(panel) {
+    if (panel._wfaaWlTimer) clearInterval(panel._wfaaWlTimer);
+    if (panel._wfaaWlTimeout) clearTimeout(panel._wfaaWlTimeout);
+    panel._wfaaWlTimer = null;
+    panel._wfaaWlTimeout = null;
+  }
+
+  function scheduleWatchlist(panel) {
+    cancelWatchlistSchedule(panel);
+    if (localStorage.getItem(AAP.WL_ENABLED) !== '1') return;
+
+    const intervalMs = Math.max(60, parseInt(panel.querySelector('#wfaa-wl-interval').value, 10) || AAP.DEFAULT_WL_INTERVAL) * 1000;
+    const lastScan = parseInt(localStorage.getItem(AAP.WL_LAST_SCAN) || '0', 10);
+    const elapsed = Date.now() - lastScan;
+    const initialDelay = lastScan > 0 ? Math.max(0, intervalMs - elapsed) : intervalMs;
+
+    const tick = () => {
+      if (localStorage.getItem(AAP.WL_ENABLED) !== '1') return;
+      runWatchlistScan(panel);
+    };
+
+    panel._wfaaWlTimeout = setTimeout(() => {
+      tick();
+      panel._wfaaWlTimer = setInterval(tick, intervalMs);
+    }, initialDelay);
+  }
+
+  async function runWatchlistScan(panel) {
+    if (panel._wfaaWlBusy) return;
+    panel._wfaaWlBusy = true;
+
+    const status = panel.querySelector('#wfaa-wl-status');
+    const results = panel.querySelector('#wfaa-wl-results');
+    const runBtn = panel.querySelector('#wfaa-wl-run');
+
+    runBtn.disabled = true;
+    results.innerHTML = '';
+
+    try {
+      const watchlist = getWatchlist();
+      if (watchlist.length === 0) {
+        status.textContent = 'Watchlist is empty. Add arcanes via the search box above.';
+        return;
+      }
+      const minVpp = Math.max(0, parseFloat(panel.querySelector('#wfaa-wl-min-vpp').value) || 0);
+      const minVpt = Math.max(0, parseInt(panel.querySelector('#wfaa-wl-min-vpt').value, 10) || 0);
+      const topM = Math.max(1, parseInt(panel.querySelector('#wfaa-wl-top-m').value, 10) || AAP.DEFAULT_WL_TOP_M);
+      const mySlug = (getMySlug() || '').toLowerCase();
+      const blocklist = getBlocklist();
+      const namesMap = await getArcaneNamesMap();
+
+      const enriched = [];
+      let droppedByMins = 0;
+      for (let i = 0; i < watchlist.length; i++) {
+        const slug = watchlist[i];
+        const name = namesMap[slug] || prettifySlug(slug);
+        status.textContent = `Checking ${i + 1}/${watchlist.length}: ${name}`;
+        try {
+          const maxRank = await getArcaneMaxRank(slug);
+          const vosforPerUnit = maxRankVosfor(slug, maxRank);
+          if (vosforPerUnit == null) {
+            // Either not in VOSFOR_MAP or unknown max-rank: silently skip.
+            continue;
+          }
+          const orders = await getItemOrders(slug);
+          // Same per-arcane best-seller selection as Ducanator: drop sellers
+          // failing any min filter, pick the one with the highest score
+          // by vosfor/plat (the natural primary metric here).
+          const candidates = orders
+            .filter(o => o.type === 'sell')
+            .filter(o => o.user?.status === 'ingame')
+            .filter(o => o.rank === maxRank)
+            .filter(o => (o.user?.slug || '').toLowerCase() !== mySlug)
+            .filter(o => !blocklist.includes((o.user?.slug || '').toLowerCase()))
+            .filter(o => o.platinum > 0)
+            .sort((a, b) => a.platinum - b.platinum);
+
+          let chosen = null, chosenK = 0, chosenScore = -Infinity;
+          let chosenBreakdown = null, chosenVpp = 0;
+          let candidatesWithK = 0;
+          for (const c of candidates) {
+            // Arcanes are P=1; effFloor=1 (any partial OK — minVpt does
+            // the meaningful filtering). minRpt=minVpt enforces per-trade
+            // vosfor floor and drops K to skip a sub-floor partial.
+            const K = findOptimalK(c.quantity || 0, 1, 1, vosforPerUnit, minVpt);
+            if (K === 0) continue;
+            candidatesWithK++;
+            const breakdown = computeTradeBreakdown(K, 1, vosforPerUnit);
+            const vpp = vosforPerUnit / c.platinum;
+            if (vpp < minVpp) continue;
+            if (breakdown.rewardsPerTrade < minVpt) continue;
+            if (vpp > chosenScore) {
+              chosen = c; chosenK = K; chosenScore = vpp;
+              chosenBreakdown = breakdown; chosenVpp = vpp;
+            }
+          }
+          if (!chosen) {
+            if (candidatesWithK > 0) droppedByMins++;
+            continue;
+          }
+          enriched.push({
+            slug, name, maxRank,
+            vosforPerUnit,
+            ingamePrice: chosen.platinum,
+            quantity: chosen.quantity,
+            boughtK: chosenK,
+            vpp: chosenVpp,
+            vpt: chosenBreakdown.rewardsPerTrade,
+            totalV: chosenBreakdown.totalRewards,
+            totalTrades: chosenBreakdown.totalTrades,
+            breakdownStr: formatTradeBreakdown(chosenBreakdown),
+            sellerName: chosen.user.ingameName || chosen.user.slug || '',
+            sellerSlug: (chosen.user.slug || '').toLowerCase(),
+          });
+        } catch (err) {
+          // Per-arcane fetch failure: log + continue.
+        }
+        if (i < watchlist.length - 1) await sleep(PACE_MS);
+      }
+
+      // Sort by vpp desc, slice to top-M.
+      enriched.sort((a, b) => b.vpp - a.vpp);
+      const top = enriched.slice(0, topM);
+      panel._wfaaWlLatestResults = top;
+
+      // Build display recs (same shape as Ducanator's renderRecs input)
+      const displayRecs = top.map(e => {
+        const whisperText = formatTradeWhisper({
+          sellerName: e.sellerName, name: e.name,
+          ingamePrice: e.ingamePrice, boughtK: e.boughtK, partsPerUnit: 1,
+        });
+        // Trade breakdown line in detail: include vosfor-per-trade so the
+        // user always sees both vpp (in name line) + vpt (in detail).
+        let breakdownLine = e.breakdownStr;
+        if (e.totalTrades > 1) {
+          breakdownLine += ` · ${e.vpt}v/trade`;
+        }
+        return {
+          name: `${e.name} (R${e.maxRank})`,
+          kind: 'deal',
+          ratio: e.vpp,
+          unit: 'v/p',
+          ratio2: e.totalV,
+          unit2: 'v total',
+          detail: `${breakdownLine} · ${e.ingamePrice}p × ${e.quantity} (seller <a href="/profile/${encodeURIComponent(e.sellerSlug || e.sellerName)}" target="_blank">${escapeHtml(e.sellerName)}</a> <a href="#" class="wfaap-block-seller" data-slug="${escapeHtml(e.sellerSlug || '')}" title="Add seller to blocklist">[block]</a> <a href="#" class="wfaap-copy-msg" data-message="${escapeHtml(whisperText)}" title="Copy whisper message to clipboard">[/w]</a> <a href="#" class="wfaap-rep-seller" data-slug="${escapeHtml(e.sellerSlug || '')}" title="Post a positive review on this seller's profile">[+rep]</a>) · ${e.vosforPerUnit}v each · <a href="/items/${encodeURIComponent(e.slug)}" target="_blank">view item</a>`,
+        };
+      });
+
+      renderRecs(results, displayRecs);
+      const noQual = watchlist.length - enriched.length - droppedByMins;
+      const cutoffParts = [];
+      if (noQual > 0) cutoffParts.push(`${noQual} no qualifying seller`);
+      if (droppedByMins > 0) {
+        const minLabels = [];
+        if (minVpp > 0) minLabels.push(`${minVpp} v/p`);
+        if (minVpt > 0) minLabels.push(`${minVpt} v/trade`);
+        cutoffParts.push(minLabels.length > 0
+          ? `${droppedByMins} no seller met min ${minLabels.join(' / ')}`
+          : `${droppedByMins} dropped`);
+      }
+      const cutoffStr = cutoffParts.length > 0 ? ` (${cutoffParts.join('; ')})` : '';
+      status.textContent = `Scanned ${watchlist.length} watched. Top ${top.length} shown${cutoffStr}.`;
+      localStorage.setItem(AAP.WL_LAST_SCAN, String(Date.now()));
+
+      // Notification dispatch — fresh-deal dedup keyed by slug:rank:seller.
+      const notifyOnRaw = localStorage.getItem(AAP.WL_NOTIFY_ENABLED);
+      const notifyOn = notifyOnRaw == null ? AAP.DEFAULT_WL_NOTIFY_ENABLED : notifyOnRaw === '1';
+      if (notifyOn && top.length > 0) {
+        const dealId = (e) => `${e.slug}:${e.maxRank}:${(e.sellerSlug || e.sellerName || '').toLowerCase()}`;
+        const notified = pruneWatchlistNotifiedDeals(getWatchlistNotifiedDeals());
+        const fresh = top.filter(e => !(dealId(e) in notified));
+        if (fresh.length > 0) {
+          const now = Date.now();
+          for (const e of top) notified[dealId(e)] = now;
+          setWatchlistNotifiedDeals(notified);
+
+          const t = top[0];
+          const title = `Arcane Watchlist: ${top.length} deal${top.length === 1 ? '' : 's'} · top ${t.vpp.toFixed(2)} v/p`;
+          const body = `${t.name} · ${t.vpt}v/trade · ${t.totalV}v total`;
+          const whisperText = formatTradeWhisper({
+            sellerName: t.sellerName, name: t.name,
+            ingamePrice: t.ingamePrice, boughtK: t.boughtK, partsPerUnit: 1,
+          });
+          try {
+            chrome.runtime.sendMessage({
+              type: 'show-notification',
+              title, body, whisperText,
+              // Notification click should focus a profile tab (where the
+              // watchlist panel lives), not Ducanator.
+              tabUrlPattern: 'https://warframe.market/profile/*',
+            }, () => { void chrome.runtime.lastError; });
+          } catch (e) { /* SW unavailable */ }
+        }
+      }
+    } catch (err) {
+      status.textContent = `Error: ${err.message || err}`;
+    } finally {
+      runBtn.disabled = false;
+      panel._wfaaWlBusy = false;
+    }
+  }
+
+  async function initArcanesPanel() {
+    injectArcanesPanel();
+    const panel = document.getElementById('wfaa-panel');
+    if (!panel) return;
+
+    // Auto-pricer initial run path mirrors DPA: skip the initial scan if
+    // we just reloaded after auto-applying changes.
+    const skipInitialAp = sessionStorage.getItem(AAP.AP_SKIP_INITIAL) === '1';
+    sessionStorage.removeItem(AAP.AP_SKIP_INITIAL);
+    if (skipInitialAp) {
+      try {
+        const stashed = JSON.parse(sessionStorage.getItem(AAP.AP_LAST_RUN) || 'null');
+        sessionStorage.removeItem(AAP.AP_LAST_RUN);
+        if (stashed?.recs) {
+          panel._wfaaApAllRecs = stashed.recs;
+          renderRecs(panel.querySelector('#wfaa-ap-results'), stashed.recs);
+          if (stashed.status) panel.querySelector('#wfaa-ap-status').textContent = stashed.status;
+        }
+      } catch (e) {}
+    }
+
+    const apEnabled = localStorage.getItem(AAP.AP_ENABLED) === '1';
+    const apStatus = await refreshArcaneAutoPricerStatus(panel);
+    if (!skipInitialAp && apEnabled && apStatus === 'ingame') {
+      await runArcaneAutoPricerScan(panel);
+    }
+    if (apEnabled) scheduleArcaneAutoPricer(panel);
+
+    if (localStorage.getItem(AAP.WL_ENABLED) === '1') {
+      runWatchlistScan(panel);
+      scheduleWatchlist(panel);
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════
   // INIT DISPATCH
   // ════════════════════════════════════════════════════════════
   async function init() {
     injectSharedCss();
 
-    // Dynamic Price Automator: only on the cached profile URL. The user
-    // claims their profile once via injectClaimProfilePrompt; from then on
-    // we only inject the panel when the URL slug matches the cached slug.
+    // Profile page: DPA + Arcanes panel both live here. Both gated on
+    // the URL slug matching the user's claimed profile (so we don't
+    // expose tools on other people's pages).
     if (isProfilePage()) {
       const cached = getCachedMySlug();
       const urlSlug = getUrlProfileSlug();
@@ -1882,6 +3025,7 @@
         injectClaimProfilePrompt(urlSlug);
       } else if (cached === urlSlug) {
         initAutoPricer();
+        initArcanesPanel();
       }
       return;
     }

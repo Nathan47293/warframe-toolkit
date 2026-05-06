@@ -517,7 +517,11 @@ async function runScan({ via }) {
 }
 
 // ─── Notification create ───
-async function fireNotification({ title, body, whisperText }) {
+// tabUrlPattern (optional, defaults to Ducanator) drives where the click
+// handler routes to. The watchlist on the profile page passes
+// 'https://warframe.market/profile/*' so clicking the notif focuses the
+// profile tab instead of opening Ducanator.
+async function fireNotification({ title, body, whisperText, tabUrlPattern }) {
   const id = `wfap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     await new Promise((resolve, reject) => {
@@ -534,7 +538,10 @@ async function fireNotification({ title, body, whisperText }) {
       });
     });
     await chrome.storage.session.set({
-      [SESSION_KEY_PREFIX + id]: { whisperText: whisperText || '' },
+      [SESSION_KEY_PREFIX + id]: {
+        whisperText: whisperText || '',
+        tabUrlPattern: tabUrlPattern || DUCANATOR_URL_PATTERN,
+      },
     });
   } catch {
     // Notification create failure isn't fatal; the scan results still go to
@@ -556,7 +563,11 @@ chrome.notifications.onClicked.addListener(async (notifId) => {
     return;
   }
   try {
-    const tabs = await findDucanatorTabs();
+    // Default to Ducanator tabs for backward-compat with notifications
+    // fired before tabUrlPattern was added (e.g. during an SW idle window
+    // around an upgrade). Watchlist notifications carry the profile pattern.
+    const pattern = action.tabUrlPattern || DUCANATOR_URL_PATTERN;
+    const tabs = await chrome.tabs.query({ url: pattern });
     if (tabs.length > 0) {
       const tab = tabs[0];
       if (tab.id != null) await chrome.tabs.update(tab.id, { active: true });
@@ -567,9 +578,11 @@ chrome.notifications.onClicked.addListener(async (notifId) => {
           text: action.whisperText,
         }, () => { void chrome.runtime.lastError; });
       }
-    } else if (action.whisperText) {
+    } else if (action.whisperText && pattern === DUCANATOR_URL_PATTERN) {
       // No Ducanator tab open: open one and queue the whisper. The new tab's
       // content script will pull and consume PENDING_WHISPER_KEY on init.
+      // (Profile-pattern notifications skip this branch since we won't open
+      // a profile tab without knowing which profile slug to point at.)
       await chrome.storage.session.set({ [PENDING_WHISPER_KEY]: action.whisperText });
       await chrome.tabs.create({ url: DUCANATOR_URL });
     }
@@ -657,6 +670,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       sendResponse({ ok: true, pendingWhisper: whisper });
     });
+    return true;
+  }
+
+  // Generic notification request from any content script. Used by the
+  // Arcane Watchlist (which runs in the content script, not the SW). The
+  // tabUrlPattern decides where the click handler routes back to: profile
+  // for the watchlist, ducats for Ducanator, etc. Defaults to ducats so
+  // older callers without the field still work.
+  if (msg.type === 'show-notification') {
+    fireNotification({
+      title: msg.title,
+      body: msg.body,
+      whisperText: msg.whisperText || '',
+      tabUrlPattern: msg.tabUrlPattern,
+    }).then(
+      () => sendResponse({ ok: true }),
+      (e) => sendResponse({ ok: false, error: String(e.message || e) })
+    );
     return true;
   }
 
