@@ -508,8 +508,12 @@ async function runScan({ via }) {
         await setNotifiedDeals(notified);
 
         const top = recs[0];
-        const title = `Ducanator: ${recs.length} deal${recs.length === 1 ? '' : 's'} · top ${top.dpp.toFixed(2)} D/p`;
-        const body = `${top.name} · ${top.dPerTrade}D/trade · ${top.totalD}D total`;
+        // D/trade leads the title since it's what actually scales with
+        // your trade-slot budget — at the same D/p, a 540D/trade deal
+        // is twice as valuable per slot as a 270D/trade one. D/p + total
+        // D drop to the body for context.
+        const title = `Ducanator: ${recs.length} deal${recs.length === 1 ? '' : 's'} · top ${top.dPerTrade}D/trade`;
+        const body = `${top.name} · ${top.dpp.toFixed(2)} D/p · ${top.totalD}D total`;
         const whisperText = `/w ${top.sellerName} Hi! I want to buy: "${top.name}" for ${top.ingamePrice} platinum. (warframe.market)`;
         await fireNotification({ title, body, whisperText });
       }

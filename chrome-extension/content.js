@@ -2893,13 +2893,15 @@
         if (i < watchlist.length - 1) await sleep(PACE_MS);
       }
 
-      // Sort by vpp desc; tiebreak on total vosfor desc so a 7p × 13
-      // listing outranks a 7p × 3 from the same seller's neighborhood
-      // (same rate, but more units = bigger haul). Slice to top-M.
+      // Sort by total vosfor desc (biggest haul first); tiebreak on vpp
+      // desc so at equal payout the better rate wins. The display still
+      // leads with vpp in the name line — sort and visual are decoupled,
+      // matching how Ducanator's name line always shows D/p regardless
+      // of sortBy.
       enriched.sort((a, b) => {
-        const d = b.vpp - a.vpp;
+        const d = b.totalV - a.totalV;
         if (d !== 0) return d;
-        return b.totalV - a.totalV;
+        return b.vpp - a.vpp;
       });
       const top = enriched.slice(0, topM);
       panel._wfaaWlLatestResults = top;
