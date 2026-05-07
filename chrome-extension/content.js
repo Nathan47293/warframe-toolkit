@@ -2127,14 +2127,13 @@
     WL_TOP_M: 'wfaa-wl-top-m',
     WL_INTERVAL: 'wfaa-wl-interval',
     WL_NOTIFY_ENABLED: 'wfaa-wl-notify-enabled',
-    WL_NOTIFIED_DEALS: 'wfaa-wl-notified-deals',
+    WL_PREV_TOP_VPT: 'wfaa-wl-prev-top-vpt',  // numeric, last scan's max v/trade
     WL_LAST_SCAN: 'wfaa-wl-last-scan',
     DEFAULT_WL_MIN_VPP: 0,
     DEFAULT_WL_MIN_VPT: 0,
     DEFAULT_WL_TOP_M: 10,
     DEFAULT_WL_INTERVAL: 600,
     DEFAULT_WL_NOTIFY_ENABLED: true,
-    WL_NOTIFY_PRUNE_MS: 60 * 60 * 1000,
     REVIEW_TEXT: 'fast, friendly, and great prices', // text posted by [+rep]
   };
 
@@ -2161,22 +2160,17 @@
     const s = (slug || '').toLowerCase().trim();
     setWatchlist(getWatchlist().filter(x => x !== s));
   }
-  function getWatchlistNotifiedDeals() {
-    try {
-      const raw = JSON.parse(localStorage.getItem(AAP.WL_NOTIFIED_DEALS) || '{}');
-      return (raw && typeof raw === 'object') ? raw : {};
-    } catch { return {}; }
+  // Notification gate (v0.34.0): track the previous scan's max v/trade
+  // and only notify when this scan strictly beats it. Updated every scan
+  // so the bar tracks current market state — same shape as the
+  // Ducanator's getPrevTopDpt in background.js.
+  function getWatchlistPrevTopVpt() {
+    const raw = localStorage.getItem(AAP.WL_PREV_TOP_VPT);
+    const n = raw == null ? null : parseFloat(raw);
+    return Number.isFinite(n) ? n : null;
   }
-  function setWatchlistNotifiedDeals(map) {
-    localStorage.setItem(AAP.WL_NOTIFIED_DEALS, JSON.stringify(map));
-  }
-  function pruneWatchlistNotifiedDeals(map) {
-    const cutoff = Date.now() - AAP.WL_NOTIFY_PRUNE_MS;
-    const out = {};
-    for (const [id, ts] of Object.entries(map)) {
-      if (typeof ts === 'number' && ts >= cutoff) out[id] = ts;
-    }
-    return out;
+  function setWatchlistPrevTopVpt(value) {
+    localStorage.setItem(AAP.WL_PREV_TOP_VPT, String(value));
   }
 
   // ─── Arcane name lookup (via items catalog) ───
@@ -2949,39 +2943,43 @@
       status.textContent = `Scanned ${watchlist.length} watched, ${totalListings} listing${totalListings === 1 ? '' : 's'} pass; top ${top.length} shown${cutoffStr}.`;
       localStorage.setItem(AAP.WL_LAST_SCAN, String(Date.now()));
 
-      // Notification dispatch — fresh-deal dedup keyed by slug:rank:seller.
+      // Notification dispatch — only fire when this scan's max v/trade
+      // strictly beats the previous scan's. Tracker advances every scan
+      // (notify or not) so after a peak deal disappears the bar drops
+      // and the next improvement re-notifies. Same shape as Ducanator's
+      // getPrevTopDpt in background.js.
+      const maxVpt = enriched.length > 0
+        ? Math.max(...enriched.map(e => e.vpt || 0))
+        : 0;
+      const prevTopVpt = getWatchlistPrevTopVpt();
+      const beatsPrev = prevTopVpt == null || maxVpt > prevTopVpt;
       const notifyOnRaw = localStorage.getItem(AAP.WL_NOTIFY_ENABLED);
       const notifyOn = notifyOnRaw == null ? AAP.DEFAULT_WL_NOTIFY_ENABLED : notifyOnRaw === '1';
-      if (notifyOn && top.length > 0) {
-        const dealId = (e) => `${e.slug}:${e.maxRank}:${(e.sellerSlug || e.sellerName || '').toLowerCase()}`;
-        const notified = pruneWatchlistNotifiedDeals(getWatchlistNotifiedDeals());
-        const fresh = top.filter(e => !(dealId(e) in notified));
-        if (fresh.length > 0) {
-          const now = Date.now();
-          for (const e of top) notified[dealId(e)] = now;
-          setWatchlistNotifiedDeals(notified);
-
-          const t = top[0];
-          // v/trade leads the title for the same reason D/trade does in
-          // Ducanator: it's what scales with your trade-slot budget.
-          // v/p + total v drop to the body for context.
-          const title = `Arcane Watchlist: ${top.length} deal${top.length === 1 ? '' : 's'} · top ${t.vpt}v/trade`;
-          const body = `${t.name} · ${t.vpp.toFixed(2)} v/p · ${t.totalV}v total`;
-          const whisperText = formatTradeWhisper({
-            sellerName: t.sellerName, name: t.name,
-            ingamePrice: t.ingamePrice, boughtK: t.boughtK, partsPerUnit: 1,
-          });
-          try {
-            chrome.runtime.sendMessage({
-              type: 'show-notification',
-              title, body, whisperText,
-              // Notification click should focus a profile tab (where the
-              // watchlist panel lives), not Ducanator.
-              tabUrlPattern: 'https://warframe.market/profile/*',
-            }, () => { void chrome.runtime.lastError; });
-          } catch (e) { /* SW unavailable */ }
-        }
+      if (notifyOn && enriched.length > 0 && beatsPrev) {
+        // Surface the listing that holds the new high v/trade as the
+        // toast subject (not top[0], which follows the user's total-V
+        // sort). Keeps the title number aligned with the body's name.
+        const t = enriched.reduce((best, e) =>
+          (e.vpt || 0) > (best.vpt || 0) ? e : best, enriched[0]);
+        const title = `Arcane Watchlist: top ${t.vpt}v/trade`;
+        const body = `${t.name} · ${t.vpp.toFixed(2)} v/p · ${t.totalV}v total`;
+        const whisperText = formatTradeWhisper({
+          sellerName: t.sellerName, name: t.name,
+          ingamePrice: t.ingamePrice, boughtK: t.boughtK, partsPerUnit: 1,
+        });
+        try {
+          chrome.runtime.sendMessage({
+            type: 'show-notification',
+            title, body, whisperText,
+            // Notification click should focus a profile tab (where the
+            // watchlist panel lives), not Ducanator.
+            tabUrlPattern: 'https://warframe.market/profile/*',
+          }, () => { void chrome.runtime.lastError; });
+        } catch (e) { /* SW unavailable */ }
       }
+      // Always advance the tracker, even if we didn't notify and even
+      // if notify is off — same rationale as the Ducanator side.
+      setWatchlistPrevTopVpt(maxVpt);
     } catch (err) {
       status.textContent = `Error: ${err.message || err}`;
     } finally {

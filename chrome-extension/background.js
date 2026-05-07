@@ -51,7 +51,7 @@ const BH = {
   SOURCE_CACHE: 'wfbh-source-cache',
   PARTS_CACHE: 'wfbh-parts-cache',
   NOTIFY_ENABLED: 'wfbh-notify-enabled',
-  NOTIFIED_DEALS: 'wfbh-notified-deals',
+  PREV_TOP_DPT: 'wfbh-prev-top-dpt',  // numeric, last scan's max D/trade
   MIN_TRADE_EFF: 'wfbh-min-trade-eff',
   SORT_BY: 'wfbh-sort-by',
   SECONDARY_SORT_BY: 'wfbh-secondary-sort-by',
@@ -70,7 +70,6 @@ const BH = {
   DEFAULT_MIN_CACHE_DPP: 0,
   DUCAT_DENOMS: [15, 25, 45, 65, 100],
   TRADE_CAP: 6,
-  NOTIFY_PRUNE_MS: 60 * 60 * 1000,
 };
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -196,22 +195,23 @@ function formatWhisper(e) {
   return `/w ${e.sellerName} Hi! I want to buy: ${K} x "${e.name}" for ${X} platinum each (Total: ${total}p). (warframe.market)`;
 }
 
-// ─── Notification dedup (chrome.storage.local, SW-owned) ───
-async function getNotifiedDeals() {
-  const data = await chrome.storage.local.get(BH.NOTIFIED_DEALS);
-  const raw = data[BH.NOTIFIED_DEALS];
-  return (raw && typeof raw === 'object') ? raw : {};
+// ─── Notification gate (chrome.storage.local, SW-owned) ───
+// We track the previous scan's max D/trade and only fire a notification
+// when the current scan strictly beats it. This replaces the old
+// slug:seller dedup map: that one notified for any fresh listing,
+// which spammed when the same item kept reappearing at slightly
+// different prices. Tracking the metric peak directly maps to "is
+// there a deal here that's actually better than what I've already
+// been told about?" Tracker is updated every scan (notify or not),
+// so after a peak deal disappears the bar drops to whatever the
+// current top is, and the next improvement re-notifies.
+async function getPrevTopDpt() {
+  const data = await chrome.storage.local.get(BH.PREV_TOP_DPT);
+  const v = data[BH.PREV_TOP_DPT];
+  return (typeof v === 'number') ? v : null;
 }
-async function setNotifiedDeals(map) {
-  await chrome.storage.local.set({ [BH.NOTIFIED_DEALS]: map });
-}
-function pruneNotifiedDeals(map) {
-  const cutoff = Date.now() - BH.NOTIFY_PRUNE_MS;
-  const out = {};
-  for (const [id, ts] of Object.entries(map)) {
-    if (typeof ts === 'number' && ts >= cutoff) out[id] = ts;
-  }
-  return out;
+async function setPrevTopDpt(value) {
+  await chrome.storage.local.set({ [BH.PREV_TOP_DPT]: value });
 }
 
 // ─── Tier list parser ───
@@ -497,27 +497,32 @@ async function runScan({ via }) {
     await chrome.storage.local.set({ [BH.LAST_SCAN]: String(lastScanTs) });
     broadcastToDucanatorTabs({ type: 'wfbh-scan-results', recs, statusText, lastScanTs });
 
-    // Notification dispatch — only fresh deals (not yet in dedup window).
-    if (s.notifyOn && recs.length > 0) {
-      const dealId = (e) => `${e.slug}:${(e.sellerSlug || e.sellerName || '').toLowerCase()}`;
-      const notified = pruneNotifiedDeals(await getNotifiedDeals());
-      const fresh = recs.filter(e => !(dealId(e) in notified));
-      if (fresh.length > 0) {
-        const now = Date.now();
-        for (const e of recs) notified[dealId(e)] = now;
-        await setNotifiedDeals(notified);
-
-        const top = recs[0];
-        // D/trade leads the title since it's what actually scales with
-        // your trade-slot budget — at the same D/p, a 540D/trade deal
-        // is twice as valuable per slot as a 270D/trade one. D/p + total
-        // D drop to the body for context.
-        const title = `Ducanator: ${recs.length} deal${recs.length === 1 ? '' : 's'} · top ${top.dPerTrade}D/trade`;
-        const body = `${top.name} · ${top.dpp.toFixed(2)} D/p · ${top.totalD}D total`;
-        const whisperText = `/w ${top.sellerName} Hi! I want to buy: "${top.name}" for ${top.ingamePrice} platinum. (warframe.market)`;
-        await fireNotification({ title, body, whisperText });
-      }
+    // Notification dispatch — only fire when this scan's max D/trade
+    // strictly beats the previous scan's. Tracker is updated every scan
+    // regardless of notify outcome, so the bar tracks the current state
+    // of the market (peak deal disappears → bar drops → next improvement
+    // re-notifies).
+    const maxDpt = enriched.length > 0
+      ? Math.max(...enriched.map(e => e.dPerTrade || 0))
+      : 0;
+    const prevTopDpt = await getPrevTopDpt();
+    const beatsPrev = prevTopDpt == null || maxDpt > prevTopDpt;
+    if (s.notifyOn && enriched.length > 0 && beatsPrev) {
+      // Surface the listing that holds the new high D/trade as the toast
+      // subject, not topResults[0] (which follows the user's sort, e.g.
+      // by D/p). This way the title number ("top XD/trade") matches the
+      // listing whose name appears in the body.
+      const top = enriched.reduce((best, e) =>
+        (e.dPerTrade || 0) > (best.dPerTrade || 0) ? e : best, enriched[0]);
+      const whisperText = formatWhisper(top);
+      const title = `Ducanator: top ${top.dPerTrade}D/trade`;
+      const body = `${top.name} · ${top.dpp.toFixed(2)} D/p · ${top.totalD}D total`;
+      await fireNotification({ title, body, whisperText });
     }
+    // Always advance the tracker, even if we didn't notify and even if
+    // notify is off — the bar should reflect what we've seen, so when
+    // notify turns back on it gates against the current state.
+    await setPrevTopDpt(maxDpt);
 
     return { ok: true };
   } catch (err) {
