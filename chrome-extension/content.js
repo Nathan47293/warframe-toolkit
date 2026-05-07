@@ -2962,8 +2962,11 @@
           setWatchlistNotifiedDeals(notified);
 
           const t = top[0];
-          const title = `Arcane Watchlist: ${top.length} deal${top.length === 1 ? '' : 's'} · top ${t.vpp.toFixed(2)} v/p`;
-          const body = `${t.name} · ${t.vpt}v/trade · ${t.totalV}v total`;
+          // v/trade leads the title for the same reason D/trade does in
+          // Ducanator: it's what scales with your trade-slot budget.
+          // v/p + total v drop to the body for context.
+          const title = `Arcane Watchlist: ${top.length} deal${top.length === 1 ? '' : 's'} · top ${t.vpt}v/trade`;
+          const body = `${t.name} · ${t.vpp.toFixed(2)} v/p · ${t.totalV}v total`;
           const whisperText = formatTradeWhisper({
             sellerName: t.sellerName, name: t.name,
             ingamePrice: t.ingamePrice, boughtK: t.boughtK, partsPerUnit: 1,
