@@ -2127,7 +2127,7 @@
     WL_TOP_M: 'wfaa-wl-top-m',
     WL_INTERVAL: 'wfaa-wl-interval',
     WL_NOTIFY_ENABLED: 'wfaa-wl-notify-enabled',
-    WL_PREV_TOP_VPT: 'wfaa-wl-prev-top-vpt',  // numeric, last scan's max v/trade
+    WL_ACTIVE_NOTIFIED: 'wfaa-wl-active-notified',  // {dealId: vpt} for currently-visible notified deals
     WL_LAST_SCAN: 'wfaa-wl-last-scan',
     DEFAULT_WL_MIN_VPP: 0,
     DEFAULT_WL_MIN_VPT: 0,
@@ -2160,17 +2160,20 @@
     const s = (slug || '').toLowerCase().trim();
     setWatchlist(getWatchlist().filter(x => x !== s));
   }
-  // Notification gate (v0.34.0): track the previous scan's max v/trade
-  // and only notify when this scan strictly beats it. Updated every scan
-  // so the bar tracks current market state — same shape as the
-  // Ducanator's getPrevTopDpt in background.js.
-  function getWatchlistPrevTopVpt() {
-    const raw = localStorage.getItem(AAP.WL_PREV_TOP_VPT);
-    const n = raw == null ? null : parseFloat(raw);
-    return Number.isFinite(n) ? n : null;
+  // Notification gate (v0.34.1): {dealId: vpt} for currently-visible
+  // deals we've already notified about. Each scan prunes entries whose
+  // dealId is no longer in results (deal got bought / delisted), then
+  // notifies only if the best new (untracked) deal strictly beats the
+  // highest still-tracked value. Same shape as Ducanator's getActiveNotified
+  // in background.js — see that comment for the full semantics.
+  function getWatchlistActiveNotified() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(AAP.WL_ACTIVE_NOTIFIED) || '{}');
+      return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+    } catch { return {}; }
   }
-  function setWatchlistPrevTopVpt(value) {
-    localStorage.setItem(AAP.WL_PREV_TOP_VPT, String(value));
+  function setWatchlistActiveNotified(map) {
+    localStorage.setItem(AAP.WL_ACTIVE_NOTIFIED, JSON.stringify(map));
   }
 
   // ─── Arcane name lookup (via items catalog) ───
@@ -2943,29 +2946,31 @@
       status.textContent = `Scanned ${watchlist.length} watched, ${totalListings} listing${totalListings === 1 ? '' : 's'} pass; top ${top.length} shown${cutoffStr}.`;
       localStorage.setItem(AAP.WL_LAST_SCAN, String(Date.now()));
 
-      // Notification dispatch — only fire when this scan's max v/trade
-      // strictly beats the previous scan's. Tracker advances every scan
-      // (notify or not) so after a peak deal disappears the bar drops
-      // and the next improvement re-notifies. Same shape as Ducanator's
-      // getPrevTopDpt in background.js.
-      const maxVpt = enriched.length > 0
-        ? Math.max(...enriched.map(e => e.vpt || 0))
-        : 0;
-      const prevTopVpt = getWatchlistPrevTopVpt();
-      const beatsPrev = prevTopVpt == null || maxVpt > prevTopVpt;
+      // Notification dispatch — see getWatchlistActiveNotified comment
+      // for semantics. Tracker is keyed by slug:rank:seller so
+      // disappearing deals free up the ceiling for new ones at any value.
+      const dealId = (e) => `${e.slug}:${e.maxRank}:${(e.sellerSlug || e.sellerName || '').toLowerCase()}`;
+      let active = getWatchlistActiveNotified();
+      const currentDealIds = new Set(enriched.map(dealId));
+      active = Object.fromEntries(
+        Object.entries(active).filter(([id]) => currentDealIds.has(id))
+      );
+      let bestNew = null;
+      for (const e of enriched) {
+        if (dealId(e) in active) continue;
+        if (bestNew == null || (e.vpt || 0) > (bestNew.vpt || 0)) {
+          bestNew = e;
+        }
+      }
+      const ceiling = Object.values(active).reduce((m, v) => Math.max(m, v), 0);
       const notifyOnRaw = localStorage.getItem(AAP.WL_NOTIFY_ENABLED);
       const notifyOn = notifyOnRaw == null ? AAP.DEFAULT_WL_NOTIFY_ENABLED : notifyOnRaw === '1';
-      if (notifyOn && enriched.length > 0 && beatsPrev) {
-        // Surface the listing that holds the new high v/trade as the
-        // toast subject (not top[0], which follows the user's total-V
-        // sort). Keeps the title number aligned with the body's name.
-        const t = enriched.reduce((best, e) =>
-          (e.vpt || 0) > (best.vpt || 0) ? e : best, enriched[0]);
-        const title = `Arcane Watchlist: top ${t.vpt}v/trade`;
-        const body = `${t.name} · ${t.vpp.toFixed(2)} v/p · ${t.totalV}v total`;
+      if (notifyOn && bestNew && (bestNew.vpt || 0) > ceiling) {
+        const title = `Arcane Watchlist: top ${bestNew.vpt}v/trade`;
+        const body = `${bestNew.name} · ${bestNew.vpp.toFixed(2)} v/p · ${bestNew.totalV}v total`;
         const whisperText = formatTradeWhisper({
-          sellerName: t.sellerName, name: t.name,
-          ingamePrice: t.ingamePrice, boughtK: t.boughtK, partsPerUnit: 1,
+          sellerName: bestNew.sellerName, name: bestNew.name,
+          ingamePrice: bestNew.ingamePrice, boughtK: bestNew.boughtK, partsPerUnit: 1,
         });
         try {
           chrome.runtime.sendMessage({
@@ -2976,10 +2981,11 @@
             tabUrlPattern: 'https://warframe.market/profile/*',
           }, () => { void chrome.runtime.lastError; });
         } catch (e) { /* SW unavailable */ }
+        active[dealId(bestNew)] = bestNew.vpt || 0;
       }
-      // Always advance the tracker, even if we didn't notify and even
-      // if notify is off — same rationale as the Ducanator side.
-      setWatchlistPrevTopVpt(maxVpt);
+      // Persist the (possibly-pruned, possibly-augmented) tracker every
+      // scan so disappeared deals stop blocking future notifications.
+      setWatchlistActiveNotified(active);
     } catch (err) {
       status.textContent = `Error: ${err.message || err}`;
     } finally {

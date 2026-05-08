@@ -51,7 +51,7 @@ const BH = {
   SOURCE_CACHE: 'wfbh-source-cache',
   PARTS_CACHE: 'wfbh-parts-cache',
   NOTIFY_ENABLED: 'wfbh-notify-enabled',
-  PREV_TOP_DPT: 'wfbh-prev-top-dpt',  // numeric, last scan's max D/trade
+  ACTIVE_NOTIFIED: 'wfbh-active-notified',  // {dealId: dPerTrade} for currently-visible notified deals
   MIN_TRADE_EFF: 'wfbh-min-trade-eff',
   SORT_BY: 'wfbh-sort-by',
   SECONDARY_SORT_BY: 'wfbh-secondary-sort-by',
@@ -196,22 +196,26 @@ function formatWhisper(e) {
 }
 
 // ─── Notification gate (chrome.storage.local, SW-owned) ───
-// We track the previous scan's max D/trade and only fire a notification
-// when the current scan strictly beats it. This replaces the old
-// slug:seller dedup map: that one notified for any fresh listing,
-// which spammed when the same item kept reappearing at slightly
-// different prices. Tracking the metric peak directly maps to "is
-// there a deal here that's actually better than what I've already
-// been told about?" Tracker is updated every scan (notify or not),
-// so after a peak deal disappears the bar drops to whatever the
-// current top is, and the next improvement re-notifies.
-async function getPrevTopDpt() {
-  const data = await chrome.storage.local.get(BH.PREV_TOP_DPT);
-  const v = data[BH.PREV_TOP_DPT];
-  return (typeof v === 'number') ? v : null;
+// We track the set of CURRENTLY VISIBLE notified deals — keyed by
+// slug:seller so we can tell "same deal still there" from "same value
+// via a different listing." Each scan: prune the tracker to only deals
+// still in current results (disappeared deals = "consumed" — bought,
+// delisted, or out-of-stock), then only notify if the best new deal
+// (one not in tracker) strictly beats the highest value among still-
+// tracked deals. This handles both:
+//   1. "Hot 400 deal stayed for 5 scans" → notify once, suppress repeats
+//      (deal stays in tracker, blocks re-notification at its value).
+//   2. "Hot 400 deal got bought, new 350 deal is the top" → notify the
+//      350 (old 400 dropped from tracker, ceiling falls to 0).
+//   3. "Hot 400 deal still there, parallel 350 deal appears" → no
+//      notify (350 < 400 ceiling, you already know about a better one).
+async function getActiveNotified() {
+  const data = await chrome.storage.local.get(BH.ACTIVE_NOTIFIED);
+  const raw = data[BH.ACTIVE_NOTIFIED];
+  return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
 }
-async function setPrevTopDpt(value) {
-  await chrome.storage.local.set({ [BH.PREV_TOP_DPT]: value });
+async function setActiveNotified(map) {
+  await chrome.storage.local.set({ [BH.ACTIVE_NOTIFIED]: map });
 }
 
 // ─── Tier list parser ───
@@ -497,32 +501,37 @@ async function runScan({ via }) {
     await chrome.storage.local.set({ [BH.LAST_SCAN]: String(lastScanTs) });
     broadcastToDucanatorTabs({ type: 'wfbh-scan-results', recs, statusText, lastScanTs });
 
-    // Notification dispatch — only fire when this scan's max D/trade
-    // strictly beats the previous scan's. Tracker is updated every scan
-    // regardless of notify outcome, so the bar tracks the current state
-    // of the market (peak deal disappears → bar drops → next improvement
-    // re-notifies).
-    const maxDpt = enriched.length > 0
-      ? Math.max(...enriched.map(e => e.dPerTrade || 0))
-      : 0;
-    const prevTopDpt = await getPrevTopDpt();
-    const beatsPrev = prevTopDpt == null || maxDpt > prevTopDpt;
-    if (s.notifyOn && enriched.length > 0 && beatsPrev) {
-      // Surface the listing that holds the new high D/trade as the toast
-      // subject, not topResults[0] (which follows the user's sort, e.g.
-      // by D/p). This way the title number ("top XD/trade") matches the
-      // listing whose name appears in the body.
-      const top = enriched.reduce((best, e) =>
-        (e.dPerTrade || 0) > (best.dPerTrade || 0) ? e : best, enriched[0]);
-      const whisperText = formatWhisper(top);
-      const title = `Ducanator: top ${top.dPerTrade}D/trade`;
-      const body = `${top.name} · ${top.dpp.toFixed(2)} D/p · ${top.totalD}D total`;
-      await fireNotification({ title, body, whisperText });
+    // Notification dispatch — see getActiveNotified comment for the
+    // semantics. Tracker is keyed by slug:seller so disappearing deals
+    // free up the ceiling for new ones at any value.
+    const dealId = (e) => `${e.slug}:${(e.sellerSlug || e.sellerName || '').toLowerCase()}`;
+    let active = await getActiveNotified();
+    // Prune: drop tracked dealIds that aren't in this scan's results.
+    // (Deal got bought, delisted, or otherwise disappeared from view.)
+    const currentDealIds = new Set(enriched.map(dealId));
+    active = Object.fromEntries(
+      Object.entries(active).filter(([id]) => currentDealIds.has(id))
+    );
+    // Find the best-by-D/trade deal among ones we haven't notified about.
+    let bestNew = null;
+    for (const e of enriched) {
+      if (dealId(e) in active) continue;
+      if (bestNew == null || (e.dPerTrade || 0) > (bestNew.dPerTrade || 0)) {
+        bestNew = e;
+      }
     }
-    // Always advance the tracker, even if we didn't notify and even if
-    // notify is off — the bar should reflect what we've seen, so when
-    // notify turns back on it gates against the current state.
-    await setPrevTopDpt(maxDpt);
+    // Ceiling: highest D/trade among deals still active (already notified).
+    const ceiling = Object.values(active).reduce((m, v) => Math.max(m, v), 0);
+    if (s.notifyOn && bestNew && (bestNew.dPerTrade || 0) > ceiling) {
+      const whisperText = formatWhisper(bestNew);
+      const title = `Ducanator: top ${bestNew.dPerTrade}D/trade`;
+      const body = `${bestNew.name} · ${bestNew.dpp.toFixed(2)} D/p · ${bestNew.totalD}D total`;
+      await fireNotification({ title, body, whisperText });
+      active[dealId(bestNew)] = bestNew.dPerTrade || 0;
+    }
+    // Persist the (possibly-pruned, possibly-augmented) tracker every
+    // scan so disappeared deals stop blocking future notifications.
+    await setActiveNotified(active);
 
     return { ok: true };
   } catch (err) {
