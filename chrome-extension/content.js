@@ -2127,13 +2127,14 @@
     WL_TOP_M: 'wfaa-wl-top-m',
     WL_INTERVAL: 'wfaa-wl-interval',
     WL_NOTIFY_ENABLED: 'wfaa-wl-notify-enabled',
-    WL_ACTIVE_NOTIFIED: 'wfaa-wl-active-notified',  // {dealId: vpt} for currently-visible notified deals
+    WL_NOTIFIED_DEALS: 'wfaa-wl-notified-deals',  // {dealId: lastSeenTs} dedup map
     WL_LAST_SCAN: 'wfaa-wl-last-scan',
     DEFAULT_WL_MIN_VPP: 0,
     DEFAULT_WL_MIN_VPT: 0,
     DEFAULT_WL_TOP_M: 10,
     DEFAULT_WL_INTERVAL: 600,
     DEFAULT_WL_NOTIFY_ENABLED: true,
+    WL_NOTIFY_PRUNE_MS: 60 * 60 * 1000,
     REVIEW_TEXT: 'fast, friendly, and great prices', // text posted by [+rep]
   };
 
@@ -2160,20 +2161,28 @@
     const s = (slug || '').toLowerCase().trim();
     setWatchlist(getWatchlist().filter(x => x !== s));
   }
-  // Notification gate (v0.34.1): {dealId: vpt} for currently-visible
-  // deals we've already notified about. Each scan prunes entries whose
-  // dealId is no longer in results (deal got bought / delisted), then
-  // notifies only if the best new (untracked) deal strictly beats the
-  // highest still-tracked value. Same shape as Ducanator's getActiveNotified
-  // in background.js — see that comment for the full semantics.
-  function getWatchlistActiveNotified() {
+  // Notification dedup (v0.34.2 revert to v0.32 model): slug:rank:seller
+  // → lastSeenTs. Notify when at least one fresh listing appears in
+  // scan results. After 1h prune, entries fall off and re-trigger.
+  // The user tunes their input filters tightly so every fresh
+  // notification is meaningful. Mirrors Ducanator's getNotifiedDeals
+  // in background.js.
+  function getWatchlistNotifiedDeals() {
     try {
-      const raw = JSON.parse(localStorage.getItem(AAP.WL_ACTIVE_NOTIFIED) || '{}');
+      const raw = JSON.parse(localStorage.getItem(AAP.WL_NOTIFIED_DEALS) || '{}');
       return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
     } catch { return {}; }
   }
-  function setWatchlistActiveNotified(map) {
-    localStorage.setItem(AAP.WL_ACTIVE_NOTIFIED, JSON.stringify(map));
+  function setWatchlistNotifiedDeals(map) {
+    localStorage.setItem(AAP.WL_NOTIFIED_DEALS, JSON.stringify(map));
+  }
+  function pruneWatchlistNotifiedDeals(map) {
+    const cutoff = Date.now() - AAP.WL_NOTIFY_PRUNE_MS;
+    const out = {};
+    for (const [id, ts] of Object.entries(map)) {
+      if (typeof ts === 'number' && ts >= cutoff) out[id] = ts;
+    }
+    return out;
   }
 
   // ─── Arcane name lookup (via items catalog) ───
@@ -2946,46 +2955,43 @@
       status.textContent = `Scanned ${watchlist.length} watched, ${totalListings} listing${totalListings === 1 ? '' : 's'} pass; top ${top.length} shown${cutoffStr}.`;
       localStorage.setItem(AAP.WL_LAST_SCAN, String(Date.now()));
 
-      // Notification dispatch — see getWatchlistActiveNotified comment
-      // for semantics. Tracker is keyed by slug:rank:seller so
-      // disappearing deals free up the ceiling for new ones at any value.
-      const dealId = (e) => `${e.slug}:${e.maxRank}:${(e.sellerSlug || e.sellerName || '').toLowerCase()}`;
-      let active = getWatchlistActiveNotified();
-      const currentDealIds = new Set(enriched.map(dealId));
-      active = Object.fromEntries(
-        Object.entries(active).filter(([id]) => currentDealIds.has(id))
-      );
-      let bestNew = null;
-      for (const e of enriched) {
-        if (dealId(e) in active) continue;
-        if (bestNew == null || (e.vpt || 0) > (bestNew.vpt || 0)) {
-          bestNew = e;
-        }
-      }
-      const ceiling = Object.values(active).reduce((m, v) => Math.max(m, v), 0);
+      // Notification dispatch — fire if there's at least one listing
+      // in current results not already in the slug:rank:seller dedup.
       const notifyOnRaw = localStorage.getItem(AAP.WL_NOTIFY_ENABLED);
       const notifyOn = notifyOnRaw == null ? AAP.DEFAULT_WL_NOTIFY_ENABLED : notifyOnRaw === '1';
-      if (notifyOn && bestNew && (bestNew.vpt || 0) > ceiling) {
-        const title = `Arcane Watchlist: top ${bestNew.vpt}v/trade`;
-        const body = `${bestNew.name} · ${bestNew.vpp.toFixed(2)} v/p · ${bestNew.totalV}v total`;
-        const whisperText = formatTradeWhisper({
-          sellerName: bestNew.sellerName, name: bestNew.name,
-          ingamePrice: bestNew.ingamePrice, boughtK: bestNew.boughtK, partsPerUnit: 1,
-        });
-        try {
-          chrome.runtime.sendMessage({
-            type: 'show-notification',
-            title, body, whisperText,
-            // Notification click should focus a profile tab (where the
-            // watchlist panel lives), not Ducanator.
-            tabUrlPattern: 'https://warframe.market/profile/*',
-          }, () => { void chrome.runtime.lastError; });
-        } catch (e) { /* SW unavailable */ }
-        active[dealId(bestNew)] = bestNew.vpt || 0;
+      if (notifyOn && enriched.length > 0) {
+        const dealId = (e) => `${e.slug}:${e.maxRank}:${(e.sellerSlug || e.sellerName || '').toLowerCase()}`;
+        const notified = pruneWatchlistNotifiedDeals(getWatchlistNotifiedDeals());
+        const fresh = enriched.filter(e => !(dealId(e) in notified));
+        if (fresh.length > 0) {
+          // Refresh ts for ALL current listings so they keep their slot
+          // through the next prune (otherwise long-lived listings fall
+          // out and re-trigger).
+          const now = Date.now();
+          for (const e of enriched) notified[dealId(e)] = now;
+          setWatchlistNotifiedDeals(notified);
+          // Toast subject is the highest-v/trade listing across the full
+          // scan, not just the fresh ones — most useful info even if
+          // we're notifying because of a different lower-rate fresh deal.
+          const t = enriched.reduce((best, e) =>
+            (e.vpt || 0) > (best.vpt || 0) ? e : best, enriched[0]);
+          const title = `Arcane Watchlist: top ${t.vpt}v/trade`;
+          const body = `${t.name} · ${t.vpp.toFixed(2)} v/p · ${t.totalV}v total`;
+          const whisperText = formatTradeWhisper({
+            sellerName: t.sellerName, name: t.name,
+            ingamePrice: t.ingamePrice, boughtK: t.boughtK, partsPerUnit: 1,
+          });
+          try {
+            chrome.runtime.sendMessage({
+              type: 'show-notification',
+              title, body, whisperText,
+              // Notification click should focus a profile tab (where the
+              // watchlist panel lives), not Ducanator.
+              tabUrlPattern: 'https://warframe.market/profile/*',
+            }, () => { void chrome.runtime.lastError; });
+          } catch (e) { /* SW unavailable */ }
+        }
       }
-      // Persist the (possibly-pruned, possibly-augmented) tracker every
-      // scan so disappeared deals stop blocking future notifications.
-      setWatchlistActiveNotified(active);
     } catch (err) {
       status.textContent = `Error: ${err.message || err}`;
     } finally {

@@ -51,7 +51,7 @@ const BH = {
   SOURCE_CACHE: 'wfbh-source-cache',
   PARTS_CACHE: 'wfbh-parts-cache',
   NOTIFY_ENABLED: 'wfbh-notify-enabled',
-  ACTIVE_NOTIFIED: 'wfbh-active-notified',  // {dealId: dPerTrade} for currently-visible notified deals
+  NOTIFIED_DEALS: 'wfbh-notified-deals',  // {dealId: lastSeenTs} dedup map
   MIN_TRADE_EFF: 'wfbh-min-trade-eff',
   SORT_BY: 'wfbh-sort-by',
   SECONDARY_SORT_BY: 'wfbh-secondary-sort-by',
@@ -70,6 +70,7 @@ const BH = {
   DEFAULT_MIN_CACHE_DPP: 0,
   DUCAT_DENOMS: [15, 25, 45, 65, 100],
   TRADE_CAP: 6,
+  NOTIFY_PRUNE_MS: 60 * 60 * 1000,  // 1h: notified deals fall off the dedup set
 };
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -195,27 +196,27 @@ function formatWhisper(e) {
   return `/w ${e.sellerName} Hi! I want to buy: ${K} x "${e.name}" for ${X} platinum each (Total: ${total}p). (warframe.market)`;
 }
 
-// ─── Notification gate (chrome.storage.local, SW-owned) ───
-// We track the set of CURRENTLY VISIBLE notified deals — keyed by
-// slug:seller so we can tell "same deal still there" from "same value
-// via a different listing." Each scan: prune the tracker to only deals
-// still in current results (disappeared deals = "consumed" — bought,
-// delisted, or out-of-stock), then only notify if the best new deal
-// (one not in tracker) strictly beats the highest value among still-
-// tracked deals. This handles both:
-//   1. "Hot 400 deal stayed for 5 scans" → notify once, suppress repeats
-//      (deal stays in tracker, blocks re-notification at its value).
-//   2. "Hot 400 deal got bought, new 350 deal is the top" → notify the
-//      350 (old 400 dropped from tracker, ceiling falls to 0).
-//   3. "Hot 400 deal still there, parallel 350 deal appears" → no
-//      notify (350 < 400 ceiling, you already know about a better one).
-async function getActiveNotified() {
-  const data = await chrome.storage.local.get(BH.ACTIVE_NOTIFIED);
-  const raw = data[BH.ACTIVE_NOTIFIED];
+// ─── Notification dedup (chrome.storage.local, SW-owned) ───
+// Simple slug:seller → lastSeenTs map. Notify when at least one fresh
+// listing (not in dedup) appears in scan results. After 1h prune,
+// entries fall off and re-trigger. The user tunes their input filters
+// (min D/p, min D/trade, etc.) tightly so every fresh notification is
+// meaningful — no metric-comparison gating in this revision.
+async function getNotifiedDeals() {
+  const data = await chrome.storage.local.get(BH.NOTIFIED_DEALS);
+  const raw = data[BH.NOTIFIED_DEALS];
   return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
 }
-async function setActiveNotified(map) {
-  await chrome.storage.local.set({ [BH.ACTIVE_NOTIFIED]: map });
+async function setNotifiedDeals(map) {
+  await chrome.storage.local.set({ [BH.NOTIFIED_DEALS]: map });
+}
+function pruneNotifiedDeals(map) {
+  const cutoff = Date.now() - BH.NOTIFY_PRUNE_MS;
+  const out = {};
+  for (const [id, ts] of Object.entries(map)) {
+    if (typeof ts === 'number' && ts >= cutoff) out[id] = ts;
+  }
+  return out;
 }
 
 // ─── Tier list parser ───
@@ -501,37 +502,32 @@ async function runScan({ via }) {
     await chrome.storage.local.set({ [BH.LAST_SCAN]: String(lastScanTs) });
     broadcastToDucanatorTabs({ type: 'wfbh-scan-results', recs, statusText, lastScanTs });
 
-    // Notification dispatch — see getActiveNotified comment for the
-    // semantics. Tracker is keyed by slug:seller so disappearing deals
-    // free up the ceiling for new ones at any value.
-    const dealId = (e) => `${e.slug}:${(e.sellerSlug || e.sellerName || '').toLowerCase()}`;
-    let active = await getActiveNotified();
-    // Prune: drop tracked dealIds that aren't in this scan's results.
-    // (Deal got bought, delisted, or otherwise disappeared from view.)
-    const currentDealIds = new Set(enriched.map(dealId));
-    active = Object.fromEntries(
-      Object.entries(active).filter(([id]) => currentDealIds.has(id))
-    );
-    // Find the best-by-D/trade deal among ones we haven't notified about.
-    let bestNew = null;
-    for (const e of enriched) {
-      if (dealId(e) in active) continue;
-      if (bestNew == null || (e.dPerTrade || 0) > (bestNew.dPerTrade || 0)) {
-        bestNew = e;
+    // Notification dispatch — fire if there's at least one listing in
+    // current results that's not in the slug:seller dedup map.
+    if (s.notifyOn && enriched.length > 0) {
+      const dealId = (e) => `${e.slug}:${(e.sellerSlug || e.sellerName || '').toLowerCase()}`;
+      const notified = pruneNotifiedDeals(await getNotifiedDeals());
+      const fresh = enriched.filter(e => !(dealId(e) in notified));
+      if (fresh.length > 0) {
+        // Refresh ts for ALL current listings (including ones already in
+        // the dedup) so they keep their slot through the next prune.
+        // Without this, a listing that's been around for >1h would fall
+        // out of dedup and re-trigger even if it never disappeared.
+        const now = Date.now();
+        for (const e of enriched) notified[dealId(e)] = now;
+        await setNotifiedDeals(notified);
+        // Subject of the toast is the highest-D/trade listing across the
+        // full scan (not just the fresh ones), since that's the most
+        // useful information — even if we're notifying because of a
+        // different lower-rate listing being newly fresh.
+        const top = enriched.reduce((best, e) =>
+          (e.dPerTrade || 0) > (best.dPerTrade || 0) ? e : best, enriched[0]);
+        const whisperText = formatWhisper(top);
+        const title = `Ducanator: top ${top.dPerTrade}D/trade`;
+        const body = `${top.name} · ${top.dpp.toFixed(2)} D/p · ${top.totalD}D total`;
+        await fireNotification({ title, body, whisperText });
       }
     }
-    // Ceiling: highest D/trade among deals still active (already notified).
-    const ceiling = Object.values(active).reduce((m, v) => Math.max(m, v), 0);
-    if (s.notifyOn && bestNew && (bestNew.dPerTrade || 0) > ceiling) {
-      const whisperText = formatWhisper(bestNew);
-      const title = `Ducanator: top ${bestNew.dPerTrade}D/trade`;
-      const body = `${bestNew.name} · ${bestNew.dpp.toFixed(2)} D/p · ${bestNew.totalD}D total`;
-      await fireNotification({ title, body, whisperText });
-      active[dealId(bestNew)] = bestNew.dPerTrade || 0;
-    }
-    // Persist the (possibly-pruned, possibly-augmented) tracker every
-    // scan so disappeared deals stop blocking future notifications.
-    await setActiveNotified(active);
 
     return { ok: true };
   } catch (err) {
